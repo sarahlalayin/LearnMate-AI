@@ -182,6 +182,7 @@ app.post('/api/rewards/approve', async (req, res) => {
 });
 
 // 啟動伺服器
+const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 LearnMate 伺服器已啟動於 port ${PORT}`);
   console.log(`- 準備好接收前端請求`);
