@@ -55,9 +55,9 @@ app.post('/api/auth/login', async (req, res) => {
 
       // 建立預設獎勵
       const defaultRewards = [
-        { familyId: family._id, title: '玩 Switch 30分鐘', points: 100 },
-        { familyId: family._id, title: '看卡通一集', points: 50 },
-        { familyId: family._id, title: '週末去公園', points: 300 }
+        { familyId: family._id, name: '玩 Switch 30分鐘', cost: 100, proposedBy: 'parent', icon: '🎮' },
+        { familyId: family._id, name: '看卡通一集', cost: 50, proposedBy: 'parent', icon: '📺' },
+        { familyId: family._id, name: '週末去公園', cost: 300, proposedBy: 'parent', icon: '⚽' }
       ];
       await Reward.insertMany(defaultRewards);
 
