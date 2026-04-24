@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>LearnMate AI - 智慧自律學習平台</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- 登入與角色選擇畫面 -->
+  <div id="screen-login" class="screen active" style="background:#1a1a2e;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;padding:20px">
+    <div style="width:56px;height:56px;border-radius:14px;background:#2d4a3e;display:flex;align-items:center;justify-content:center;margin-bottom:14px">
+      <span style="font-size:24px;color:#a8d5b5;font-weight:500">L</span>
+    </div>
+    <div style="font-size:22px;font-weight:500;color:#e8d5b7;margin-bottom:5px">LearnMate AI</div>
+    <div style="font-size:12px;color:rgba(232,213,183,0.45);margin-bottom:32px">智慧自律學習平台</div>
+
+    <!-- 登入表單 -->
+    <div style="width:100%; max-width: 320px; background: rgba(255,255,255,0.05); border-radius: 16px; padding: 20px; margin-bottom: 20px;">
+      <div style="margin-bottom: 12px;">
+        <label style="color: #e8d5b7; font-size: 12px; margin-bottom: 4px; display: block;">家庭代碼 (Family Code)</label>
+        <input type="text" id="family-code-input" value="DEMO123" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid rgba(232,213,183,0.3); background: rgba(0,0,0,0.2); color: white;">
+      </div>
+    </div>
+
+    <div onclick="loginAsParent()" style="background:#fff;border-radius:16px;padding:16px 20px;width:100%; max-width:320px; margin-bottom:10px;cursor:pointer;position:relative">
+      <div style="font-size:22px;margin-bottom:6px">👩‍👦</div>
+      <div style="font-size:14px;font-weight:500;color:#0f0f14;margin-bottom:3px">我是家長</div>
+      <div style="font-size:11px;color:#9ca3af">設定孩子課表、查看學習狀態、出補強題</div>
+      <div style="position:absolute;right:16px;top:50%;transform:translateY(-50%);width:30px;height:30px;background:#1a1a2e;border-radius:50%;display:flex;align-items:center;justify-content:center">
+        <span style="color:#e8d5b7;font-size:14px">→</span>
+      </div>
+    </div>
+
+    <div onclick="loginAsStudent()" style="background:#2d4a3e;border-radius:16px;padding:16px 20px;width:100%; max-width:320px; cursor:pointer;position:relative">
+      <div style="font-size:22px;margin-bottom:6px">🧒</div>
+      <div style="font-size:14px;font-weight:500;color:#e8d5b7;margin-bottom:3px">我是學生</div>
+      <div style="font-size:11px;color:rgba(232,213,183,0.55)">開始今天的讀書，賺點數換獎勵</div>
+      <div style="position:absolute;right:16px;top:50%;transform:translateY(-50%);width:30px;height:30px;background:#1d6b50;border-radius:50%;display:flex;align-items:center;justify-content:center">
+        <span style="color:#a8d5b5;font-size:14px">→</span>
+      </div>
+    </div>
+    
+    <div style="font-size:10px;color:rgba(232,213,183,0.2);margin-top:20px">Demo v1.0 · Local Storage Mode</div>
+  </div>
+
+  <!-- App 容器 (登入後顯示) -->
+  <div id="app-container" style="display:none; width:100%; height:100%; max-width:400px; margin:0 auto; position:relative; background:#f5f5f0; overflow:hidden;">
+    
+    <!-- === 家長端畫面 === -->
+    
+    <!-- P1: 今日快覽 -->
+    <div id="screen-parent-home" class="screen p-screen">
+      <div class="p-topbar">
+        <div>
+          <div class="p-topbar-title">今日快覽</div>
+          <div class="p-topbar-sub" id="p-date-display">星期六 16:42 · 下午</div>
+        </div>
+        <div style="display:flex;gap:6px">
+          <div style="background:#1a1a2e;border-radius:20px;padding:4px 10px;cursor:pointer"><span style="font-size:11px;font-weight:500;color:#e8d5b7" id="p-child-name">小明</span></div>
+        </div>
+      </div>
+      <div class="p-content">
+        <!-- 狀態橫幅 (動態產生) -->
+        <div id="p-status-banner"></div>
+        
+        <div class="stat-grid">
+          <div class="stat-item"><div class="stat-val" id="p-stat-completed">0/5</div><div class="stat-lbl">今日完成</div></div>
+          <div class="stat-item"><div class="stat-val" id="p-stat-rate">82%</div><div class="stat-lbl">本週完成率</div></div>
+          <div class="stat-item"><div class="stat-val" id="p-stat-accuracy">71%</div><div class="stat-lbl">各科正確率</div></div>
+          <div class="stat-item"><div class="stat-val" id="p-stat-streak">🔥0</div><div class="stat-lbl">連勤天數</div></div>
+        </div>
+
+        <div class="p-card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div style="font-size:13px;font-weight:500;color:#0f0f14">你需要知道的</div>
+            <div onclick="navTo('screen-parent-alerts')" style="font-size:11px;color:#2d4a3e;cursor:pointer">查看全部 →</div>
+          </div>
+          <div id="p-alerts-preview">
+            <!-- 預警列表預覽 -->
+          </div>
+        </div>
+
+        <div style="display:flex;gap:7px;margin-top:2px">
+          <div onclick="navTo('screen-parent-msg')" style="flex:1;background:#fff;border:0.5px solid #e5e7eb;border-radius:9px;padding:9px;text-align:center;cursor:pointer"><div style="font-size:16px;margin-bottom:3px">💬</div><div style="font-size:10px;font-weight:500;color:#0f0f14">傳留言</div></div>
+          <div onclick="navTo('screen-parent-msg')" style="flex:1;background:#1a1a2e;border-radius:9px;padding:9px;text-align:center;cursor:pointer"><div style="font-size:16px;margin-bottom:3px">✏️</div><div style="font-size:10px;font-weight:500;color:#e8d5b7">出補強題</div></div>
+          <div onclick="navTo('screen-parent-insights')" style="flex:1;background:#fff;border:0.5px solid #e5e7eb;border-radius:9px;padding:9px;text-align:center;cursor:pointer"><div style="font-size:16px;margin-bottom:3px">📊</div><div style="font-size:10px;font-weight:500;color:#0f0f14">詳細洞察</div></div>
+        </div>
+      </div>
+      
+      <div class="p-bottom-nav">
+        <div class="p-nav-item active" onclick="navTo('screen-parent-home')"><div class="p-nav-icon">🏠</div><div class="p-nav-label">快覽</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-alerts')"><div class="p-nav-icon">⚡</div><div class="p-nav-label">預警</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-msg')"><div class="p-nav-icon">💬</div><div class="p-nav-label">派題</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-insights')"><div class="p-nav-icon">📊</div><div class="p-nav-label">洞察</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-rewards')"><div class="p-nav-icon">⭐</div><div class="p-nav-label">獎勵</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-settings')"><div class="p-nav-icon">⚙️</div><div class="p-nav-label">設定</div></div>
+        <div class="p-nav-item" onclick="logout()"><div class="p-nav-icon">🚪</div><div class="p-nav-label">登出</div></div>
+      </div>
+    </div>
+
+    <!-- P2: 早期預警 -->
+    <div id="screen-parent-alerts" class="screen p-screen">
+      <div class="p-topbar"><div class="p-back" onclick="navTo('screen-parent-home')">←</div><div class="p-topbar-title">早期預警</div><div style="width:30px"></div></div>
+      <div class="p-content" id="p-alerts-list">
+        <!-- 動態載入預警 -->
+      </div>
+      <div class="p-bottom-nav">
+        <div class="p-nav-item" onclick="navTo('screen-parent-home')"><div class="p-nav-icon">🏠</div><div class="p-nav-label">快覽</div></div>
+        <div class="p-nav-item active" onclick="navTo('screen-parent-alerts')"><div class="p-nav-icon">⚡</div><div class="p-nav-label">預警</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-msg')"><div class="p-nav-icon">💬</div><div class="p-nav-label">派題</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-insights')"><div class="p-nav-icon">📊</div><div class="p-nav-label">洞察</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-rewards')"><div class="p-nav-icon">⭐</div><div class="p-nav-label">獎勵</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-settings')"><div class="p-nav-icon">⚙️</div><div class="p-nav-label">設定</div></div>
+        <div class="p-nav-item" onclick="logout()"><div class="p-nav-icon">🚪</div><div class="p-nav-label">登出</div></div>
+      </div>
+    </div>
+
+    <!-- P3: 留言與派題 -->
+    <div id="screen-parent-msg" class="screen p-screen">
+      <div class="p-topbar"><div class="p-back" onclick="navTo('screen-parent-home')">←</div><div class="p-topbar-title">留言 & 派題</div><div style="width:30px"></div></div>
+      <div class="p-content">
+        <div class="p-card" style="margin-bottom:10px">
+          <div style="font-size:13px;font-weight:500;color:#0f0f14;margin-bottom:10px">傳留言給孩子</div>
+          <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:9px">
+            <div onclick="fillMsg('寶貝今天辛苦了！你已經做得很棒了，剩下的我們一起努力 ❤️')" style="background:#f3f4f6;border:0.5px solid #e5e7eb;border-radius:16px;padding:4px 9px;cursor:pointer;font-size:10px;color:#4b5563">鼓勵打氣</div>
+            <div onclick="fillMsg('看到你數學進步好多，為你感到驕傲喔！🌟')" style="background:#f3f4f6;border:0.5px solid #e5e7eb;border-radius:16px;padding:4px 9px;cursor:pointer;font-size:10px;color:#4b5563">稱讚進步</div>
+            <div onclick="fillMsg('哪裡卡住了嗎？別擔心，等爸爸媽媽回去一起看 📖')" style="background:#f3f4f6;border:0.5px solid #e5e7eb;border-radius:16px;padding:4px 9px;cursor:pointer;font-size:10px;color:#4b5563">溫暖救援</div>
+          </div>
+          <textarea id="msg-input" rows="3" style="width:100%;border:0.5px solid #d1d5db;border-radius:8px;padding:9px;font-size:12px;resize:none;color:#0f0f14;background:#fff" placeholder="寫給孩子的話..."></textarea>
+          <button onclick="sendMsg()" class="p-btn p-btn-green p-btn-lg">傳給他 →</button>
+          <div id="msg-sent" style="display:none;background:#F0FFF4;border:0.5px solid #9AE6B4;border-radius:8px;padding:8px 11px;margin-top:8px;font-size:11px;color:#276749">✓ 已即時傳送到孩子的 App！</div>
+        </div>
+
+        <div class="p-card">
+          <div style="font-size:13px;font-weight:500;color:#0f0f14;margin-bottom:8px">出補強練習題</div>
+          <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:9px">
+            <div onclick="fillTopic('英語', '現在進行式 5題 中等難度')" style="background:#f3f4f6;border:0.5px solid #e5e7eb;border-radius:16px;padding:4px 9px;cursor:pointer;font-size:10px;color:#4b5563">英語現在進行式</div>
+            <div onclick="fillTopic('數學', '分數加減 5題 進階難度')" style="background:#f3f4f6;border:0.5px solid #e5e7eb;border-radius:16px;padding:4px 9px;cursor:pointer;font-size:10px;color:#4b5563">數學分數加減</div>
+          </div>
+          
+          <select id="topic-subject" style="width:100%;border:0.5px solid #d1d5db;border-radius:8px;padding:9px;font-size:12px;margin-bottom:8px;background:#fff">
+            <option value="國語">國語</option>
+            <option value="數學">數學</option>
+            <option value="英語">英語</option>
+            <option value="自然">自然</option>
+            <option value="社會">社會</option>
+          </select>
+          <textarea id="topic-input" rows="2" style="width:100%;border:0.5px solid #d1d5db;border-radius:8px;padding:9px;font-size:12px;resize:none;color:#0f0f14;background:#fff" placeholder="例如：現在進行式 5題"></textarea>
+          
+          <button onclick="generateQuiz()" id="gen-btn" class="p-btn p-btn-dark p-btn-lg">從題庫生成 →</button>
+          
+          <div id="preview-box" style="display:none;margin-top:10px">
+            <div style="font-size:11px;font-weight:500;color:#276749;margin-bottom:8px">預覽題目</div>
+            <div id="quiz-preview-list"></div>
+            <div style="display:flex;gap:7px;margin-top:10px">
+              <button onclick="publishQuiz()" style="flex:1;background:#2d4a3e;color:#a8d5b5;border:none;border-radius:16px;padding:9px;font-size:12px;font-weight:500;cursor:pointer">發佈給孩子 ✓</button>
+              <button onclick="hidePreview()" style="flex:1;background:#f3f4f6;color:#6b7280;border:none;border-radius:16px;padding:9px;font-size:12px;cursor:pointer">取消</button>
+            </div>
+          </div>
+          <div id="published-box" style="display:none;background:#F0FFF4;border:0.5px solid #9AE6B4;border-radius:8px;padding:10px;margin-top:8px;font-size:12px;font-weight:500;color:#276749">✓ 已上架！</div>
+        </div>
+      </div>
+      <div class="p-bottom-nav">
+        <div class="p-nav-item" onclick="navTo('screen-parent-home')"><div class="p-nav-icon">🏠</div><div class="p-nav-label">快覽</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-alerts')"><div class="p-nav-icon">⚡</div><div class="p-nav-label">預警</div></div>
+        <div class="p-nav-item active" onclick="navTo('screen-parent-msg')"><div class="p-nav-icon">💬</div><div class="p-nav-label">派題</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-insights')"><div class="p-nav-icon">📊</div><div class="p-nav-label">洞察</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-rewards')"><div class="p-nav-icon">⭐</div><div class="p-nav-label">獎勵</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-settings')"><div class="p-nav-icon">⚙️</div><div class="p-nav-label">設定</div></div>
+        <div class="p-nav-item" onclick="logout()"><div class="p-nav-icon">🚪</div><div class="p-nav-label">登出</div></div>
+      </div>
+    </div>
+
+    <!-- P4: 學習洞察 -->
+    <div id="screen-parent-insights" class="screen p-screen">
+      <div class="p-topbar"><div class="p-back" onclick="navTo('screen-parent-home')">←</div><div class="p-topbar-title">學習洞察</div><div style="width:30px"></div></div>
+      <div class="p-content">
+        <div class="ai-report">
+          <div style="font-size:9px;font-weight:500;color:#a8d5b5;background:rgba(168,213,181,0.15);border-radius:10px;padding:2px 8px;display:inline-block;margin-bottom:8px;letter-spacing:.06em;text-transform:uppercase">AI 週報 · 自動生成</div>
+          <div style="font-size:14px;font-weight:500;color:#e8d5b7;margin-bottom:7px">本週學習健康報告</div>
+          <div style="font-size:11px;color:rgba(232,213,183,0.7);line-height:1.7;margin-bottom:10px" id="p-ai-report-text">
+            整體表現穩定。數學有明顯突破，非常值得鼓勵。英語目前正確率較低，建議提供加強練習。
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px" id="p-ai-report-tags">
+            <!-- Tags generated dynamically -->
+          </div>
+          <div onclick="navTo('screen-parent-msg')" style="background:#a8d5b5;border-radius:16px;padding:7px 14px;font-size:11px;font-weight:500;color:#2d4a3e;display:inline-block;cursor:pointer">根據報告出補強題 →</div>
+        </div>
+        
+        <div class="p-card">
+          <div style="font-size:13px;font-weight:500;color:#0f0f14;margin-bottom:12px">各科正確率</div>
+          <div id="p-insights-bars">
+            <!-- 橫條圖動態生成 -->
+          </div>
+        </div>
+      </div>
+      <div class="p-bottom-nav">
+        <div class="p-nav-item" onclick="navTo('screen-parent-home')"><div class="p-nav-icon">🏠</div><div class="p-nav-label">快覽</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-alerts')"><div class="p-nav-icon">⚡</div><div class="p-nav-label">預警</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-msg')"><div class="p-nav-icon">💬</div><div class="p-nav-label">派題</div></div>
+        <div class="p-nav-item active" onclick="navTo('screen-parent-insights')"><div class="p-nav-icon">📊</div><div class="p-nav-label">洞察</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-rewards')"><div class="p-nav-icon">⭐</div><div class="p-nav-label">獎勵</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-settings')"><div class="p-nav-icon">⚙️</div><div class="p-nav-label">設定</div></div>
+        <div class="p-nav-item" onclick="logout()"><div class="p-nav-icon">🚪</div><div class="p-nav-label">登出</div></div>
+      </div>
+    </div>
+
+    <!-- P5: 獎勵設定 -->
+    <div id="screen-parent-rewards" class="screen p-screen">
+      <div class="p-topbar"><div class="p-back" onclick="navTo('screen-parent-home')">←</div><div class="p-topbar-title">獎勵設定</div><div style="width:30px"></div></div>
+      <div class="p-content" id="p-rewards-list">
+        <!-- 動態生成獎勵 -->
+      </div>
+      <div class="p-bottom-nav">
+        <div class="p-nav-item" onclick="navTo('screen-parent-home')"><div class="p-nav-icon">🏠</div><div class="p-nav-label">快覽</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-alerts')"><div class="p-nav-icon">⚡</div><div class="p-nav-label">預警</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-msg')"><div class="p-nav-icon">💬</div><div class="p-nav-label">派題</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-insights')"><div class="p-nav-icon">📊</div><div class="p-nav-label">洞察</div></div>
+        <div class="p-nav-item active" onclick="navTo('screen-parent-rewards')"><div class="p-nav-icon">⭐</div><div class="p-nav-label">獎勵</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-settings')"><div class="p-nav-icon">⚙️</div><div class="p-nav-label">設定</div></div>
+        <div class="p-nav-item" onclick="logout()"><div class="p-nav-icon">🚪</div><div class="p-nav-label">登出</div></div>
+      </div>
+    </div>
+
+    <!-- P6: 設定 -->
+    <div id="screen-parent-settings" class="screen p-screen">
+      <div class="p-topbar"><div class="p-back" onclick="navTo('screen-parent-home')">←</div><div class="p-topbar-title">個人化設定</div><div style="width:30px"></div></div>
+      <div class="p-content">
+        <div class="p-card">
+          <div style="font-size:13px;font-weight:500;margin-bottom:12px">學生基本資料</div>
+          <div style="margin-bottom:8px">
+            <div style="font-size:11px;color:#4b5563;margin-bottom:4px">年級</div>
+            <select id="set-grade" style="width:100%;padding:8px;border-radius:6px;border:1px solid #d1d5db;font-size:13px">
+              <option value="1">小學一年級</option><option value="2">小學二年級</option>
+              <option value="3">小學三年級</option><option value="4">小學四年級</option>
+              <option value="5">小學五年級</option><option value="6">小學六年級</option>
+            </select>
+          </div>
+          <div style="font-size:11px;color:#4b5563;margin-bottom:4px">各科教材版本</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <div><div style="font-size:10px;color:#888;margin-bottom:2px">國語</div><select id="set-ed-國語" style="width:100%;padding:6px;border-radius:4px;border:1px solid #d1d5db"><option>南一版</option><option>康軒版</option><option>翰林版</option></select></div>
+            <div><div style="font-size:10px;color:#888;margin-bottom:2px">數學</div><select id="set-ed-數學" style="width:100%;padding:6px;border-radius:4px;border:1px solid #d1d5db"><option>康軒版</option><option>南一版</option><option>翰林版</option></select></div>
+            <div><div style="font-size:10px;color:#888;margin-bottom:2px">社會</div><select id="set-ed-社會" style="width:100%;padding:6px;border-radius:4px;border:1px solid #d1d5db"><option>翰林版</option><option>康軒版</option><option>南一版</option></select></div>
+            <div><div style="font-size:10px;color:#888;margin-bottom:2px">自然</div><select id="set-ed-自然" style="width:100%;padding:6px;border-radius:4px;border:1px solid #d1d5db"><option>翰林版</option><option>康軒版</option><option>南一版</option></select></div>
+            <div><div style="font-size:10px;color:#888;margin-bottom:2px">英語</div><select id="set-ed-英語" style="width:100%;padding:6px;border-radius:4px;border:1px solid #d1d5db"><option>康軒版</option><option>南一版</option><option>翰林版</option></select></div>
+          </div>
+          <button onclick="saveSettings()" class="p-btn p-btn-dark p-btn-lg" style="margin-top:14px">儲存設定</button>
+        </div>
+      </div>
+      <div class="p-bottom-nav">
+        <div class="p-nav-item" onclick="navTo('screen-parent-home')"><div class="p-nav-icon">🏠</div><div class="p-nav-label">快覽</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-alerts')"><div class="p-nav-icon">⚡</div><div class="p-nav-label">預警</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-msg')"><div class="p-nav-icon">💬</div><div class="p-nav-label">派題</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-insights')"><div class="p-nav-icon">📊</div><div class="p-nav-label">洞察</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-rewards')"><div class="p-nav-icon">⭐</div><div class="p-nav-label">獎勵</div></div>
+        <div class="p-nav-item active" onclick="navTo('screen-parent-settings')"><div class="p-nav-icon">⚙️</div><div class="p-nav-label">設定</div></div>
+        <div class="p-nav-item" onclick="logout()"><div class="p-nav-icon">🚪</div><div class="p-nav-label">登出</div></div>
+      </div>
+    </div>
+
+
+    <!-- === 學生端畫面 === -->
+
+    <!-- S1: 基地 -->
+    <div id="screen-student-home" class="screen s-screen">
+      <div style="background:#fff;padding:11px 14px 8px;display:flex;justify-content:space-between;align-items:center;border-bottom:0.5px solid #e5e7eb">
+        <div>
+          <div style="font-size:18px;font-weight:500;color:#0f0f14" id="s-greeting">嗨！</div>
+          <div style="font-size:11px;color:#9ca3af;margin-top:1px" id="s-date-display">星期六</div>
+        </div>
+        <div style="width:36px;height:36px;border-radius:18px;background:#1a1a2e;display:flex;align-items:center;justify-content:center"><span style="font-size:14px;font-weight:500;color:#e8d5b7" id="s-avatar-text">學</span></div>
+      </div>
+      <div class="p-content">
+        <!-- 連勤橫幅 -->
+        <div style="background:#FFFBEB;border:0.5px solid #ECC94B;border-radius:10px;padding:9px 12px;margin-bottom:9px;display:flex;align-items:center;gap:8px">
+          <span style="font-size:18px">🔥</span>
+          <div style="flex:1">
+            <div style="font-size:12px;font-weight:500;color:#744210" id="s-streak-title">連續讀書中！</div>
+            <div style="font-size:10px;color:#975A16;margin-top:1px">繼續保持喔！</div>
+          </div>
+          <div style="font-size:22px;font-weight:500;color:#744210"><span id="s-streak-days">0</span><span style="font-size:12px;font-weight:400">天</span></div>
+        </div>
+        
+        <!-- 今日進度 -->
+        <div style="background:#1a1a2e;border-radius:12px;padding:13px 14px;margin-bottom:9px;display:flex;align-items:center;gap:12px">
+          <div style="position:relative;width:60px;height:60px;flex-shrink:0">
+            <div style="width:60px;height:60px;border-radius:30px;border:5px solid rgba(232,213,183,0.15)"></div>
+            <div id="s-progress-ring" style="position:absolute;top:0;left:0;width:60px;height:60px;border-radius:30px;border:5px solid transparent;border-top-color:#e8d5b7;border-right-color:#e8d5b7;transform:rotate(-45deg)"></div>
+            <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column">
+              <div style="font-size:16px;font-weight:500;color:#e8d5b7;line-height:1" id="s-tasks-completed">0</div>
+              <div style="font-size:10px;color:rgba(232,213,183,0.5)" id="s-tasks-total">/0</div>
+            </div>
+          </div>
+          <div>
+            <div style="font-size:14px;font-weight:500;color:#e8d5b7;margin-bottom:3px">今天的任務</div>
+            <div style="font-size:11px;color:rgba(232,213,183,0.55);margin-bottom:9px">你決定從哪個開始</div>
+            <div onclick="navTo('screen-student-choose')" style="background:#2d4a3e;border-radius:16px;padding:5px 12px;display:inline-block;cursor:pointer;font-size:11px;font-weight:500;color:#a8d5b5">我來選順序 →</div>
+          </div>
+        </div>
+
+        <!-- 留言板 -->
+        <div id="s-messages-container"></div>
+
+        <div style="font-size:10px;font-weight:500;color:#9ca3af;letter-spacing:.06em;text-transform:uppercase;margin-bottom:7px;margin-top:12px">今日科目</div>
+        <div class="p-card" style="padding:8px 12px" id="s-tasks-list">
+          <!-- 任務列表動態生成 -->
+        </div>
+      </div>
+      <div class="p-bottom-nav">
+        <div class="p-nav-item active" onclick="navTo('screen-student-home')"><div class="p-nav-icon">🏠</div><div class="p-nav-label">基地</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-student-choose')"><div class="p-nav-icon">📋</div><div class="p-nav-label">選順序</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-student-rewards')"><div class="p-nav-icon">⭐</div><div class="p-nav-label">收藏庫</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-student-extra')"><div class="p-nav-icon">💪</div><div class="p-nav-label">加強</div></div>
+        <div class="p-nav-item" onclick="logout()"><div class="p-nav-icon">🚪</div><div class="p-nav-label">登出</div></div>
+      </div>
+    </div>
+
+    <!-- S2: 選順序 -->
+    <div id="screen-student-choose" class="screen s-screen">
+      <div class="p-topbar"><div class="p-back" onclick="navTo('screen-student-home')">←</div><div class="p-topbar-title">我來選順序</div><div style="width:30px"></div></div>
+      <div class="p-content">
+        <div style="font-size:17px;font-weight:500;color:#0f0f14;margin-bottom:4px">今天想從哪個開始？</div>
+        <div style="font-size:12px;color:#9ca3af;margin-bottom:12px">點擊「開始」直接進入測驗</div>
+        
+        <div id="s-choose-list">
+          <!-- 排序列表 -->
+        </div>
+      </div>
+    </div>
+
+    <!-- S3: 測驗畫面 -->
+    <div id="screen-student-quiz" class="screen s-screen">
+      <div class="p-topbar">
+        <div class="p-back" onclick="cancelQuiz()">←</div>
+        <div style="font-size:12px;color:#9ca3af" id="s-quiz-subject">科目</div>
+        <div style="width:30px"></div>
+      </div>
+      <div class="p-content">
+        <div class="step-dots" id="qdots">
+          <!-- 點點動態生成 -->
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <div style="font-size:9px;font-weight:500;color:#9ca3af;letter-spacing:1px;text-transform:uppercase" id="qnum">QUESTION 1</div>
+          <span style="font-size:10px;color:#9ca3af;" id="qcounter">1 / 5 題</span>
+        </div>
+        
+        <div style="background:#1a1a2e;border-radius:12px;padding:15px;margin-bottom:15px">
+          <div style="font-size:14px;color:#e8d5b7;line-height:1.65" id="qtext">載入題目中...</div>
+        </div>
+        
+        <div id="opts">
+          <!-- 選項動態生成 -->
+        </div>
+        
+        <div id="explain" style="display:none;border-radius:10px;padding:10px 12px;margin-bottom:10px"></div>
+        
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px; margin-top: 20px;">
+          <div id="pts-label" style="font-size:12px;color:#22c55e;font-weight:500;position:relative">
+            選擇你的答案
+          </div>
+          <div id="next-btn" style="display:none;background:#1a1a2e;color:#e8d5b7;border:none;border-radius:16px;padding:8px 16px;font-size:12px;font-weight:500;cursor:pointer" onclick="nextQ()">下一題 →</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- S4: 暫停 (Skip) -->
+    <div id="screen-student-skip" class="screen s-screen">
+      <div class="p-topbar"><div class="p-back" onclick="navTo('screen-student-home')">←</div><div class="p-topbar-title">今天先暫停</div><div style="width:30px"></div></div>
+      <div class="p-content">
+        <div style="font-size:14px;font-weight:500;color:#0f0f14;margin-bottom:4px">今天先暫停哪一科？</div>
+        <div style="font-size:11px;color:#9ca3af;margin-bottom:14px">沒關係，但要選一個原因，讓爸媽知道發生什麼事。</div>
+        
+        <div style="font-size:10px;font-weight:500;color:#9ca3af;letter-spacing:.06em;text-transform:uppercase;margin-bottom:7px">暫停科目</div>
+        <div style="background:#1a1a2e;border-radius:20px;padding:6px 14px;display:inline-block;margin-bottom:14px">
+          <span style="font-size:13px;font-weight:500;color:#e8d5b7" id="s-skip-subject">未知</span>
+        </div>
+        
+        <div style="font-size:10px;font-weight:500;color:#9ca3af;letter-spacing:.06em;text-transform:uppercase;margin-bottom:7px">暫停原因</div>
+        <div class="reason" onclick="selReason(this,'功課太多')"><div class="radio"></div><div style="font-size:12px;color:#0f0f14">今天其他功課太多了</div></div>
+        <div class="reason" onclick="selReason(this,'身體不舒服')"><div class="radio"></div><div style="font-size:12px;color:#0f0f14">身體不舒服</div></div>
+        <div class="reason" onclick="selReason(this,'看不懂')"><div class="radio"></div><div style="font-size:12px;color:#9B2C2C">這個科目我看不懂，需要爸媽幫忙 🚨</div></div>
+        <div class="reason" onclick="selReason(this,'太累了')"><div class="radio"></div><div style="font-size:12px;color:#0f0f14">今天太累了，明天補上</div></div>
+        
+        <div id="confirm-box" style="display:none;background:#FFFBEB;border:0.5px solid #ECC94B;border-radius:9px;padding:11px 13px;margin-top:15px">
+          <div style="font-size:11px;font-weight:500;color:#744210;margin-bottom:4px">確認</div>
+          <div style="font-size:11px;color:#975A16;line-height:1.5;margin-bottom:10px" id="confirm-text">跳過：扣 5 點 + 爸媽會看到你選的原因。</div>
+          <div style="display:flex;gap:7px">
+            <div onclick="navTo('screen-student-home')" class="p-btn p-btn-ghost" style="flex:1;text-align:center;padding:8px;cursor:pointer;font-size:11px">算了，我還是讀</div>
+            <div onclick="confirmSkip()" class="p-btn p-btn-dark" style="flex:1;text-align:center;padding:8px;cursor:pointer;font-size:11px">確認暫停 (−5點)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- S5: 收藏庫 -->
+    <div id="screen-student-rewards" class="screen s-screen">
+      <div class="p-topbar"><div class="p-topbar-title">我的收藏庫 ⭐</div></div>
+      <div class="p-content">
+        <div style="font-size:11px;color:#9ca3af;margin-bottom:10px">點數是你努力的紀錄，跟爸媽一起決定換什麼</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:12px">
+          <div style="background:#1a1a2e;border-radius:9px;padding:12px;text-align:center">
+            <div style="font-size:24px;font-weight:500;color:#e8d5b7" id="s-rewards-pts">0</div>
+            <div style="font-size:10px;color:rgba(232,213,183,0.45);margin-top:2px">目前點數</div>
+          </div>
+          <div style="background:#1a1a2e;border-radius:9px;padding:12px;text-align:center">
+            <div style="font-size:24px;font-weight:500;color:#e8d5b7" id="s-rewards-streak">0</div>
+            <div style="font-size:10px;color:rgba(232,213,183,0.45);margin-top:2px">連勤天數</div>
+          </div>
+        </div>
+        
+        <div class="p-card" id="s-rewards-list">
+          <!-- 獎勵列表 -->
+        </div>
+
+        <!-- 提議新獎勵 -->
+        <div style="border:1px dashed #d1d5db;border-radius:10px;padding:12px;margin-top:12px">
+          <div style="font-size:12px;color:#6b7280;margin-bottom:8px">想要的獎勵不在清單上？</div>
+          <button onclick="proposeReward()" style="width:100%;background:transparent;border:1px solid #d1d5db;border-radius:20px;padding:8px;font-size:11px;font-weight:500;color:#4b5563;cursor:pointer">提議新獎勵 📝</button>
+        </div>
+      </div>
+      <div class="p-bottom-nav">
+        <div class="p-nav-item" onclick="navTo('screen-student-home')"><div class="p-nav-icon">🏠</div><div class="p-nav-label">基地</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-student-choose')"><div class="p-nav-icon">📋</div><div class="p-nav-label">選順序</div></div>
+        <div class="p-nav-item active" onclick="navTo('screen-student-rewards')"><div class="p-nav-icon">⭐</div><div class="p-nav-label">收藏庫</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-student-extra')"><div class="p-nav-icon">💪</div><div class="p-nav-label">加強</div></div>
+        <div class="p-nav-item" onclick="logout()"><div class="p-nav-icon">🚪</div><div class="p-nav-label">登出</div></div>
+      </div>
+    </div>
+
+    <!-- S6: 加強練習 -->
+    <div id="screen-student-extra" class="screen s-screen">
+      <div class="p-topbar"><div class="p-topbar-title">加強練習</div></div>
+      <div class="p-content">
+        <div style="background:#F0FFF4;border:0.5px solid #9AE6B4;border-radius:10px;padding:9px 12px;margin-bottom:12px">
+          <div style="font-size:10px;font-weight:500;color:#276749;margin-bottom:3px">爸媽說：</div>
+          <div style="font-size:12px;color:#0f0f14;line-height:1.5">這邊有幾題加強練習，做完有額外點數喔！</div>
+        </div>
+        <div id="s-extra-list">
+          <!-- 加強題列表 -->
+        </div>
+      </div>
+      <div class="p-bottom-nav">
+        <div class="p-nav-item" onclick="navTo('screen-student-home')"><div class="p-nav-icon">🏠</div><div class="p-nav-label">基地</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-student-choose')"><div class="p-nav-icon">📋</div><div class="p-nav-label">選順序</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-student-rewards')"><div class="p-nav-icon">⭐</div><div class="p-nav-label">收藏庫</div></div>
+        <div class="p-nav-item active" onclick="navTo('screen-student-extra')"><div class="p-nav-icon">💪</div><div class="p-nav-label">加強</div></div>
+        <div class="p-nav-item" onclick="logout()"><div class="p-nav-icon">🚪</div><div class="p-nav-label">登出</div></div>
+      </div>
+    </div>
+    
+  </div>
+
+  <script src="app_api.js?v=4"></script>
+</body>
+</html>
