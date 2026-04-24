@@ -45,11 +45,11 @@ app.post('/api/auth/login', async (req, res) => {
       
       // 建立預設任務
       const defaultTasks = [
-        { familyId: family._id, subject: '國語', topic: 'L1 詞語複習', type: 'system', totalQuestions: 5 },
-        { familyId: family._id, subject: '數學', topic: '單元1 加減法', type: 'system', totalQuestions: 5 },
-        { familyId: family._id, subject: '英語', topic: 'Unit 1 單字', type: 'system', totalQuestions: 5 },
-        { familyId: family._id, subject: '自然', topic: '第一章 觀測', type: 'system', totalQuestions: 5 },
-        { familyId: family._id, subject: '社會', topic: 'L1 家鄉', type: 'system', totalQuestions: 5 }
+        { familyId: family._id, subject: '國語', topic: 'L1 詞語複習', type: 'daily', totalQuestions: 5 },
+        { familyId: family._id, subject: '數學', topic: '單元1 加減法', type: 'daily', totalQuestions: 5 },
+        { familyId: family._id, subject: '英語', topic: 'Unit 1 單字', type: 'daily', totalQuestions: 5 },
+        { familyId: family._id, subject: '自然', topic: '第一章 觀測', type: 'daily', totalQuestions: 5 },
+        { familyId: family._id, subject: '社會', topic: 'L1 家鄉', type: 'daily', totalQuestions: 5 }
       ];
       await Task.insertMany(defaultTasks);
 
