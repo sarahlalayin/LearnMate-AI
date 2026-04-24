@@ -162,7 +162,6 @@ app.post('/api/rewards/approve', async (req, res) => {
     if (action === 'approve') {
       reqItem.status = 'approved';
     } else {
-      // 婉拒，退還點數
       reward.requests.pull(requestId);
       const family = await Family.findById(familyId);
       family.points += reward.cost;
@@ -170,12 +169,126 @@ app.post('/api/rewards/approve', async (req, res) => {
     }
     await reward.save();
 
-    // 儲存家長留言
     if (message) {
       await Message.create({ familyId, text: message, from: 'parent' });
     }
 
     res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 7-1. 學生標記已使用獎勵 (從清單移除)
+app.post('/api/rewards/use', async (req, res) => {
+  try {
+    const { rewardId, requestId } = req.body;
+    const reward = await Reward.findById(rewardId);
+    if(reward) {
+      reward.requests.pull(requestId);
+      await reward.save();
+    }
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 8. 儲存家長設定 (Profile)
+app.post('/api/profile/update', async (req, res) => {
+  try {
+    const { familyId, grade, editions } = req.body;
+    await Family.findByIdAndUpdate(familyId, { profile: { grade, editions } });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 9. 傳送家長留言
+app.post('/api/messages/send', async (req, res) => {
+  try {
+    const { familyId, text } = req.body;
+    await Message.create({ familyId, text, from: 'parent' });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 10. 完成測驗/更新點數
+app.post('/api/tasks/complete', async (req, res) => {
+  try {
+    const { familyId, taskId, pointsToAdd } = req.body;
+    if(taskId) {
+      await Task.findByIdAndUpdate(taskId, { status: 'completed' });
+    }
+    const family = await Family.findById(familyId);
+    family.points += pointsToAdd;
+    await family.save();
+    res.json({ success: true, points: family.points });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 11. 跳過任務
+app.post('/api/tasks/skip', async (req, res) => {
+  try {
+    const { familyId, taskId, reason } = req.body;
+    const task = await Task.findByIdAndUpdate(taskId, { status: 'skipped' });
+    const family = await Family.findById(familyId);
+    family.points = Math.max(0, family.points - 5);
+    await family.save();
+
+    let alertType = 'warning';
+    let alertTitle = `${task.subject} — 暫停`;
+    let alertDesc = `孩子因為「${reason}」暫停了這科。`;
+
+    if(reason === '看不懂') {
+      alertType = 'critical';
+      alertTitle = `${task.subject} — 需要神隊友救援 🚨`;
+      alertDesc = '孩子誠實地表示這科看不懂，這是一個很棒的自我察覺！建議今晚先給他一個擁抱，再一起看看哪裡卡住了。';
+    } else if(reason === '功課太多') {
+      alertTitle = `${task.subject} — 功課太多暫停`;
+      alertDesc = `孩子覺得學校功課太多，選擇先讓大腦休息。請給予他的時間管理肯定！`;
+    }
+
+    await Alert.create({ familyId, type: alertType, title: alertTitle, desc: alertDesc });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 8. 同步完整資料庫狀態 (給前端統一看板使用)
+app.get('/api/sync/:familyId', async (req, res) => {
+  try {
+    const familyId = req.params.familyId;
+    const family = await Family.findById(familyId);
+    if (!family) return res.status(404).json({ success: false, error: '找不到家庭' });
+
+    const tasks = await Task.find({ familyId });
+    const rewards = await Reward.find({ familyId });
+    const alerts = await Alert.find({ familyId }).sort({ createdAt: -1 });
+    const messages = await Message.find({ familyId }).sort({ createdAt: 1 });
+
+    const db = {
+      familyId: family._id,
+      childName: family.childName,
+      profile: family.profile,
+      points: family.points,
+      streak: family.streak,
+      tasks: tasks.filter(t => t.type === 'daily'),
+      extraTasks: tasks.filter(t => t.type === 'extra'),
+      rewards: rewards,
+      // 展開所有的 requests 並加上 rewardId
+      rewardRequests: rewards.flatMap(r => r.requests.map(req => ({ ...req.toObject(), rewardId: r._id, _id: req._id.toString() }))),
+      alerts: alerts,
+      messages: messages.map(m => m.text)
+    };
+
+    res.json({ success: true, db });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
