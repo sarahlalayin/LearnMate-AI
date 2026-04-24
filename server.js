@@ -42,7 +42,26 @@ app.post('/api/auth/login', async (req, res) => {
         points: 320,
         streak: 5
       });
-      console.log('🆕 建立了新的家庭帳號:', familyCode);
+      
+      // 建立預設任務
+      const defaultTasks = [
+        { familyId: family._id, subject: '國語', topic: 'L1 詞語複習', type: 'system', totalQuestions: 5 },
+        { familyId: family._id, subject: '數學', topic: '單元1 加減法', type: 'system', totalQuestions: 5 },
+        { familyId: family._id, subject: '英語', topic: 'Unit 1 單字', type: 'system', totalQuestions: 5 },
+        { familyId: family._id, subject: '自然', topic: '第一章 觀測', type: 'system', totalQuestions: 5 },
+        { familyId: family._id, subject: '社會', topic: 'L1 家鄉', type: 'system', totalQuestions: 5 }
+      ];
+      await Task.insertMany(defaultTasks);
+
+      // 建立預設獎勵
+      const defaultRewards = [
+        { familyId: family._id, title: '玩 Switch 30分鐘', points: 100 },
+        { familyId: family._id, title: '看卡通一集', points: 50 },
+        { familyId: family._id, title: '週末去公園', points: 300 }
+      ];
+      await Reward.insertMany(defaultRewards);
+
+      console.log('🆕 建立了新的家庭帳號並初始化課表與獎勵:', familyCode);
     }
     
     res.json({ success: true, family });
