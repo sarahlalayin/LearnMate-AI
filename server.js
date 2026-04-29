@@ -103,16 +103,27 @@ function buildQuizPrompt(subject, topic, grade, edition, count = 5) {
 [{"q":"題目","opts":["A","B","C","D"],"a":0,"exp":"解析"}]`;
 }
 
-function buildVideoPrompt(grade, weakSubjects, topics) {
+function buildVideoPrompt(grade, editions, weakSubjects, topics) {
+  // 建立「科目: 版本」的字串對照表，供 Gemini 參考
+  let editionsStr = '';
+  if (editions) {
+    try {
+      const entries = editions instanceof Map ? Array.from(editions.entries()) : Object.entries(editions);
+      editionsStr = entries.map(([sub, ed]) => `${sub}(${ed})`).join('、');
+    } catch(e) {}
+  }
+  
   return `你是台灣小學${grade}年級學習顧問，請針對以下情況推薦 3 個適合的 YouTube 學習影片主題。
 
 學生資訊：
 - 年級：${grade}年級
+- 各科對應教材版本：${editionsStr || '無特定版本'}
 - 需要加強的科目：${weakSubjects}
 - 目前學習主題：${topics}
 
+請依據學生的「年級」與對應科目的「教材版本」，精準推測最適合的教學影片關鍵字。
 請以 JSON 格式回傳，只回傳 JSON，不要有其他文字：
-[{"title":"影片標題（繁體中文，生動有趣）","channel":"推薦頻道名稱（台灣教育頻道）","keyword":"YouTube搜尋關鍵字","subject":"科目","duration":"預估時長","desc":"一句話推薦理由"}]`;
+[{"title":"影片標題（繁體中文，生動有趣）","channel":"推薦頻道名稱（台灣教育頻道）","keyword":"YouTube搜尋關鍵字（必須包含年級、科目、單元與精準的教材版本）","subject":"科目","duration":"預估時長","desc":"一句話推薦理由"}]`;
 }
 
 function buildInsightPrompt(childName, grade, completionRate, accuracyData, skipped, hasExtra) {
@@ -221,7 +232,8 @@ app.post('/api/videos/recommend', async (req, res) => {
     }
 
     // Step 1：Gemini 生成搜尋關鍵字（不消耗 YouTube Quota）
-    const prompt = buildVideoPrompt(grade || '5', weakSubjects || '英語', topics || '現在進行式');
+    const editions = family?.profile?.editions || {};
+    const prompt = buildVideoPrompt(grade || '5', editions, weakSubjects || '英語', topics || '現在進行式');
     const rawText = await callGemini(prompt);
     let suggestions = null;
     if (rawText) {

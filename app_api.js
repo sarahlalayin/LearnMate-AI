@@ -84,6 +84,7 @@ function updateScreenData(screenId) {
   const db = getDB();
   if (screenId === 'screen-parent-home') renderParentHome(db);
   else if (screenId === 'screen-parent-alerts') renderParentAlerts(db);
+  else if (screenId === 'screen-parent-msg') renderParentMsg(db);
   else if (screenId === 'screen-parent-insights') renderParentInsights(db);
   else if (screenId === 'screen-parent-settings') renderParentSettings(db);
   else if (screenId === 'screen-parent-rewards') renderParentRewards(db);
@@ -409,29 +410,69 @@ function publishQuiz() {
   document.getElementById('topic-input').value = '';
 }
 
+// --- 派題選單動態生成 ---
+function renderParentMsg(db) {
+  const select = document.getElementById('topic-subject');
+  if (select && db.profile && db.profile.editions) {
+    const subs = Object.keys(db.profile.editions);
+    select.innerHTML = subs.map(s => `<option value="${s}">${s}</option>`).join('');
+  }
+}
+
 // --- 家長設定與獎勵管理邏輯 ---
 function renderParentSettings(db) {
   document.getElementById('set-grade').value = db.profile.grade;
-  ['國語','數學','社會','自然','英語'].forEach(sub => {
-    const el = document.getElementById(`set-ed-${sub}`);
-    if(el) el.value = db.profile.editions[sub] || '通用版';
+  const container = document.getElementById('settings-subjects-container');
+  container.innerHTML = '';
+  const editions = db.profile.editions || { '國語':'南一版', '數學':'康軒版', '社會':'翰林版', '自然':'翰林版', '英語':'康軒版' };
+  
+  Object.entries(editions).forEach(([sub, ed]) => {
+    container.innerHTML += buildSubjectRow(sub, ed);
   });
+}
+
+function buildSubjectRow(subjectName, editionName) {
+  return `
+    <div class="subject-setting-row" style="display:flex;gap:8px;align-items:center;background:#f9fafb;padding:8px;border-radius:6px;border:1px solid #e5e7eb">
+      <input type="text" class="sub-name-input" value="${subjectName}" placeholder="科目名稱 (如: 作文)" style="flex:1;padding:6px;border-radius:4px;border:1px solid #d1d5db;font-size:12px">
+      <input type="text" class="sub-ed-input" value="${editionName}" placeholder="教材版本 (如: 康軒版)" style="flex:1;padding:6px;border-radius:4px;border:1px solid #d1d5db;font-size:12px">
+      <div onclick="removeSubjectSetting(this)" style="color:#ef4444;font-size:16px;cursor:pointer;padding:0 4px">×</div>
+    </div>
+  `;
+}
+
+function addSubjectSetting() {
+  const container = document.getElementById('settings-subjects-container');
+  container.innerHTML += buildSubjectRow('', '通用版');
+}
+
+function removeSubjectSetting(btn) {
+  btn.parentElement.remove();
 }
 
 async function saveSettings() {
   const grade = document.getElementById('set-grade').value;
   const editions = {};
-  ['國語','數學','社會','自然','英語'].forEach(sub => {
-    const el = document.getElementById(`set-ed-${sub}`);
-    if(el) editions[sub] = el.value;
+  
+  const rows = document.querySelectorAll('.subject-setting-row');
+  rows.forEach(row => {
+    const sub = row.querySelector('.sub-name-input').value.trim();
+    const ed = row.querySelector('.sub-ed-input').value.trim() || '通用版';
+    if (sub) {
+      editions[sub] = ed;
+    }
   });
+  
+  if (Object.keys(editions).length === 0) {
+    return alert('至少需要保留一個科目喔！');
+  }
   
   try {
     await fetch(`${API_BASE}/profile/update`, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ familyId: currentFamilyId, grade, editions })
     });
-    alert('設定已儲存！');
+    alert('設定已儲存！影片推薦已更新，下次進入學生端就會生效。');
     syncAndRender();
   } catch(e) { alert('儲存失敗'); }
 }

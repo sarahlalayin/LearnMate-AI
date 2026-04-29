@@ -141,11 +141,7 @@
           </div>
           
           <select id="topic-subject" style="width:100%;border:0.5px solid #d1d5db;border-radius:8px;padding:9px;font-size:12px;margin-bottom:8px;background:#fff">
-            <option value="國語">國語</option>
-            <option value="數學">數學</option>
-            <option value="英語">英語</option>
-            <option value="自然">自然</option>
-            <option value="社會">社會</option>
+            <!-- 動態生成科目選項 -->
           </select>
           <textarea id="topic-input" rows="2" style="width:100%;border:0.5px solid #d1d5db;border-radius:8px;padding:9px;font-size:12px;resize:none;color:#0f0f14;background:#fff" placeholder="例如：現在進行式 5題"></textarea>
           
@@ -238,13 +234,12 @@
               <option value="5">小學五年級</option><option value="6">小學六年級</option>
             </select>
           </div>
-          <div style="font-size:11px;color:#4b5563;margin-bottom:4px">各科教材版本</div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-            <div><div style="font-size:10px;color:#888;margin-bottom:2px">國語</div><select id="set-ed-國語" style="width:100%;padding:6px;border-radius:4px;border:1px solid #d1d5db"><option>南一版</option><option>康軒版</option><option>翰林版</option></select></div>
-            <div><div style="font-size:10px;color:#888;margin-bottom:2px">數學</div><select id="set-ed-數學" style="width:100%;padding:6px;border-radius:4px;border:1px solid #d1d5db"><option>康軒版</option><option>南一版</option><option>翰林版</option></select></div>
-            <div><div style="font-size:10px;color:#888;margin-bottom:2px">社會</div><select id="set-ed-社會" style="width:100%;padding:6px;border-radius:4px;border:1px solid #d1d5db"><option>翰林版</option><option>康軒版</option><option>南一版</option></select></div>
-            <div><div style="font-size:10px;color:#888;margin-bottom:2px">自然</div><select id="set-ed-自然" style="width:100%;padding:6px;border-radius:4px;border:1px solid #d1d5db"><option>翰林版</option><option>康軒版</option><option>南一版</option></select></div>
-            <div><div style="font-size:10px;color:#888;margin-bottom:2px">英語</div><select id="set-ed-英語" style="width:100%;padding:6px;border-radius:4px;border:1px solid #d1d5db"><option>康軒版</option><option>南一版</option><option>翰林版</option></select></div>
+          <div style="font-size:11px;color:#4b5563;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center">
+            <span>各科教材版本</span>
+            <span onclick="addSubjectSetting()" style="color:#2d4a3e;cursor:pointer;font-weight:500">+ 新增科目</span>
+          </div>
+          <div id="settings-subjects-container" style="display:flex;flex-direction:column;gap:8px">
+            <!-- 動態生成各科版本輸入框 -->
           </div>
           <button onclick="saveSettings()" class="p-btn p-btn-dark p-btn-lg" style="margin-top:14px">儲存設定</button>
         </div>
