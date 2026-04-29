@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const path = require('path');
 
 const Family = require('./models/Family');
 const Task = require('./models/Task');
@@ -12,6 +13,17 @@ const Message = require('./models/Message');
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// ── 靜態檔案服務 ───────────────────────────────
+// Render 上：server.js 和 index_api.html 都在 repo 根目錄 (同一層)
+// process.cwd() 取得 Node 執行目錄（在 Render 上就是 repo 根目錄）
+const STATIC_DIR = process.cwd();
+app.use(express.static(STATIC_DIR));
+
+// 根路由 → 回傳 index_api.html
+app.get('/', (req, res) => {
+  res.sendFile(path.join(STATIC_DIR, 'index_api.html'));
+});
 
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/learnmate';
 mongoose.connect(MONGODB_URI)
@@ -470,8 +482,16 @@ app.get('/api/sync/:familyId', async (req, res) => {
   }
 });
 
+// 其他 GET 路由回到首頁（避免重新整理出現 404）
+app.get('*', (req, res) => {
+  if (!req.path.startsWith('/api')) {
+    res.sendFile(path.join(STATIC_DIR, 'index_api.html'));
+  }
+});
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 LearnMate 伺服器已啟動於 port ${PORT}`);
   console.log(`✅ AI 功能：Gemini 2.0 Flash / 考題生成 / 影片推薦 / 週報分析`);
+  console.log(`🌐 前端頁面會暴露於 http://localhost:${PORT}`);
 });
