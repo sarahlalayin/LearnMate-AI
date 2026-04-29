@@ -301,8 +301,6 @@ function renderParentInsights(db) {
   }
 }
 
-}
-
 function fillMsg(text) { document.getElementById('msg-input').value = text; }
 async function sendMsg() {
   const text = document.getElementById('msg-input').value;
