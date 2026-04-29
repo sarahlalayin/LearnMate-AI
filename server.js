@@ -17,13 +17,15 @@ app.use(express.json());
 // ── 靜態檔案服務 ───────────────────────────────
 // Render 上：server.js 和 index_api.html 都在 repo 根目錄 (同一層)
 // process.cwd() 取得 Node 執行目錄（在 Render 上就是 repo 根目錄）
+// ★ index: 'index_api.html' 確保預設首頁是後端版，而非 index.html（本機版）
 const STATIC_DIR = process.cwd();
-app.use(express.static(STATIC_DIR));
+app.use(express.static(STATIC_DIR, { index: 'index_api.html' }));
 
 // 根路由 → 回傳 index_api.html
 app.get('/', (req, res) => {
   res.sendFile(path.join(STATIC_DIR, 'index_api.html'));
 });
+
 
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/learnmate';
 mongoose.connect(MONGODB_URI)
