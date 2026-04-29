@@ -1,3 +1,35 @@
+// --- AI 設定 (Gemini 2.0 Flash) ---
+// API Key 從 localStorage 動態讀取，支援 Demo 輸入框設定
+// 預設備援 Key（昨天提供）：若 localStorage 無設定，自動採用
+const DEFAULT_GEMINI_KEY = 'AIzaSyAae-KsjFX9Ahv2-DFuwxt9rYwT6lhxI98';
+function getGeminiKey() {
+  return localStorage.getItem('learnmate_gemini_key') || DEFAULT_GEMINI_KEY;
+}
+function setGeminiKey(key) {
+  localStorage.setItem('learnmate_gemini_key', key.trim());
+}
+
+// 通用 Gemini REST API 呼叫函式
+async function callGeminiAPI(prompt) {
+  const apiKey = getGeminiKey();
+  if (!apiKey) { console.warn('尚未設定 Gemini API Key，切換 Mock 模式'); return null; }
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+    });
+    if (!resp.ok) { console.warn('Gemini 回傳錯誤:', resp.status); return null; }
+    const data = await resp.json();
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    return text.replace(/```json/g, '').replace(/```/g, '').trim();
+  } catch (e) {
+    console.warn('Gemini API 呼叫失敗，切換 Mock 模式:', e.message);
+    return null;
+  }
+}
+
 // --- 初始狀態與 Mock 資料 ---
 let currentUser = null; // 'parent' or 'student'
 let currentScreen = 'screen-login';
@@ -42,24 +74,22 @@ const defaultDB = {
   rewardRequests: [] // { id, rewardId, date, status: 'pending'|'approved' }
 };
 
-const API_BASE = 'https://learnmate-ai-j8oq.onrender.com/api';
-let globalDB = null;
-let currentFamilyId = null;
-
-async function syncAndRender() {
-  try {
-    const res = await fetch(`${API_BASE}/sync/${currentFamilyId}`);
-    const data = await res.json();
-    if(data.success) {
-      globalDB = data.db;
-      updateScreenData(currentScreen);
-    }
-  } catch(e) { console.error('API Sync Error:', e); }
+function initDB() {
+  if (!localStorage.getItem('learnmate_db')) {
+    localStorage.setItem('learnmate_db', JSON.stringify(defaultDB));
+  }
 }
-
-function initDB() {} // No longer needed
-function getDB() { return globalDB; } // Return memory state
-function saveDB(db) {} // No longer needed, all saves go through specific API calls
+function getDB() { 
+  const db = JSON.parse(localStorage.getItem('learnmate_db')); 
+  if(!db) return defaultDB;
+  if(!db.rewardRequests) db.rewardRequests = [];
+  if(!db.extraTasks) db.extraTasks = [];
+  if(!db.messages) db.messages = [];
+  if(!db.alerts) db.alerts = [];
+  if(!db.rewards) db.rewards = defaultDB.rewards;
+  return db;
+}
+function saveDB(db) { localStorage.setItem('learnmate_db', JSON.stringify(db)); }
 
 // --- 導覽與畫面切換 ---
 function navTo(screenId) {
@@ -74,8 +104,9 @@ function navTo(screenId) {
   next.classList.add('active');
   currentScreen = screenId;
   
-  // 觸發該畫面的更新邏輯
+  // 更新資料並修正 nav 位置
   updateScreenData(screenId);
+  setTimeout(updateNavPosition, 50); // nav 在新畫面出現後重新定位
 }
 
 function updateScreenData(screenId) {
@@ -89,70 +120,34 @@ function updateScreenData(screenId) {
   else if (screenId === 'screen-student-choose') renderStudentChoose(db);
   else if (screenId === 'screen-student-rewards') renderStudentRewards(db);
   else if (screenId === 'screen-student-extra') renderStudentExtra(db);
-  else if (screenId === 'screen-student-videos') renderStudentVideos(db); // ★ 新增
+  else if (screenId === 'screen-student-videos') renderStudentVideos(db);
 }
 
 // --- 登入邏輯 ---
-async function loginAsParent() {
+function loginAsParent() {
   const code = document.getElementById('family-code-input').value;
-  if(!code) return alert('請輸入家庭代碼');
-  
-  const btn = document.querySelector('div[onclick="loginAsParent()"]');
-  const originalText = btn.innerHTML;
-  btn.innerHTML = '<div style="font-size:14px;font-weight:500;color:#0f0f14;text-align:center">連線中...請稍候</div>';
-  btn.style.pointerEvents = 'none';
-  
-  try {
-    const res = await fetch(`${API_BASE}/auth/login`, {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ familyCode: code })
-    });
-    const data = await res.json();
-    if(data.success) {
-      currentUser = 'parent';
-      currentFamilyId = data.family._id;
-      document.getElementById('screen-login').classList.remove('active');
-      document.getElementById('app-container').style.display = 'block';
-      await syncAndRender();
-      navTo('screen-parent-home');
-    } else { alert('登入失敗：' + (data.error || '')); }
-  } catch(e) { 
-    alert('無法連線到伺服器，請確認伺服器已啟動且資料庫已連線。'); 
-  } finally {
-    btn.innerHTML = originalText;
-    btn.style.pointerEvents = 'auto';
-  }
+  if(code !== familyCode) { alert('家庭代碼錯誤'); return; }
+  const keyInput = document.getElementById('gemini-key-input');
+  if (keyInput && keyInput.value.trim()) setGeminiKey(keyInput.value.trim());
+  currentUser = 'parent';
+  initDB();
+  document.getElementById('screen-login').classList.remove('active');
+  document.getElementById('app-container').style.display = 'block';
+  setTimeout(updateNavPosition, 50);
+  navTo('screen-parent-home');
 }
 
-async function loginAsStudent() {
+function loginAsStudent() {
   const code = document.getElementById('family-code-input').value;
-  if(!code) return alert('請輸入家庭代碼');
-  
-  const btn = document.querySelector('div[onclick="loginAsStudent()"]');
-  const originalText = btn.innerHTML;
-  btn.innerHTML = '<div style="font-size:14px;font-weight:500;color:#e8d5b7;text-align:center">連線中...請稍候</div>';
-  btn.style.pointerEvents = 'none';
-  
-  try {
-    const res = await fetch(`${API_BASE}/auth/login`, {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ familyCode: code })
-    });
-    const data = await res.json();
-    if(data.success) {
-      currentUser = 'student';
-      currentFamilyId = data.family._id;
-      document.getElementById('screen-login').classList.remove('active');
-      document.getElementById('app-container').style.display = 'block';
-      await syncAndRender();
-      navTo('screen-student-home');
-    } else { alert('登入失敗：' + (data.error || '')); }
-  } catch(e) { 
-    alert('無法連線到伺服器，請確認伺服器已啟動且資料庫已連線。'); 
-  } finally {
-    btn.innerHTML = originalText;
-    btn.style.pointerEvents = 'auto';
-  }
+  if(code !== familyCode) { alert('家庭代碼錯誤'); return; }
+  const keyInput = document.getElementById('gemini-key-input');
+  if (keyInput && keyInput.value.trim()) setGeminiKey(keyInput.value.trim());
+  currentUser = 'student';
+  initDB();
+  document.getElementById('screen-login').classList.remove('active');
+  document.getElementById('app-container').style.display = 'block';
+  setTimeout(updateNavPosition, 50);
+  navTo('screen-student-home');
 }
 
 function logout() {
@@ -162,8 +157,6 @@ function logout() {
   currentScreen = 'screen-login';
   document.getElementById('screen-login').classList.add('active');
   currentUser = null;
-  currentFamilyId = null;
-  globalDB = null;
 }
 
 // --- 家長端邏輯 ---
@@ -244,6 +237,7 @@ function renderParentInsights(db) {
   let insightText = '';
   let tags = [];
   
+  // 智能動態分析
   if (completionRate >= 80) {
     insightText = `太棒了！小明本週完成率達到 ${completionRate}%，表現非常穩定且積極。`;
     tags.push(`<span style="background:rgba(168,213,181,0.2);color:#2d4a3e;border-radius:12px;padding:3px 8px;font-size:10px;font-weight:500">🌟 狀態極佳</span>`);
@@ -255,16 +249,17 @@ function renderParentInsights(db) {
     tags.push(`<span style="background:rgba(229,62,62,0.2);color:#c0392b;border-radius:12px;padding:3px 8px;font-size:10px;font-weight:500">❤️ 需要抱抱</span>`);
   }
   
+  // 尋找被跳過或遇到困難的科目
   const skippedTask = db.tasks.find(t => t.status === 'skipped');
   if (skippedTask) {
-    insightText += `<br><br>💡 <b>專屬建議</b>：小明在「${skippedTask.subject}」遇到了一點瓶頸，建議今晚可以花 5 分鐘聽聽他的感覺，不要急著教，給他一個大大的擁抱！`;
+    insightText += `<br><br>💡 **專屬建議**：小明在「${skippedTask.subject}」遇到了一點瓶頸，並且誠實地表達了出來！這是一個很好的自我察覺。建議今晚可以花 5 分鐘聽聽他的感覺，不要急著教，給他一個大大的擁抱！`;
     tags.push(`<span style="background:rgba(214,158,46,0.2);color:#92600a;border-radius:12px;padding:3px 8px;font-size:10px;font-weight:500">💪 ${skippedTask.subject}需協助</span>`);
   } else {
-    const extra = db.extraTasks ? db.extraTasks.length : 0;
+    const extra = db.extraTasks.length;
     if (extra > 0) {
-      insightText += `<br><br>💡 <b>專屬建議</b>：您已經派發了加強練習，現在只要適時給予口頭鼓勵，讓他知道您看見了他的努力即可。`;
+      insightText += `<br><br>💡 **專屬建議**：您已經派發了加強練習，現在只要適時給予口頭鼓勵，讓他知道您看見了他的努力即可。`;
     } else {
-      insightText += `<br><br>💡 <b>專屬建議</b>：目前學習節奏良好，您可以挑選一門他表現不錯的科目，具體稱讚他的進步（例如：看到你數學連續算對好多題，真的長大了！）。`;
+      insightText += `<br><br>💡 **專屬建議**：目前學習節奏良好，您可以挑選一門他表現不錯的科目，具體稱讚他的進步（例如：看到你數學連續算對好多題，真的長大了！）。`;
     }
   }
 
@@ -273,124 +268,158 @@ function renderParentInsights(db) {
   if(pText) pText.innerHTML = insightText;
   if(pTags) pTags.innerHTML = tags.join('');
 
-  // ★ 使用真實 subjectAccuracy，若沒有資料則顯示 —
-  const accuracy = db.subjectAccuracy || {};
-  const defaultPct = { '國語': null, '數學': null, '社會': null, '自然': null, '英語': null };
-  const merged = { ...defaultPct, ...accuracy };
+  // ★ 非同步：呼叫 Gemini 生成真實週報（不阻塞畫面）
+  loadAIWeeklyReport(db, completionRate, insightText);
+
+  // 長條圖
+  const barData = [
+    { sub: '國語', val: 90, color: '#1a1a2e' },
+    { sub: '數學', val: 84, color: '#22c55e' },
+    { sub: '社會', val: 78, color: '#1a1a2e' },
+    { sub: '自然', val: 85, color: '#1a1a2e' },
+    { sub: '英語', val: 44, color: '#ef4444' }
+  ];
   const list = document.getElementById('p-insights-bars');
   if(list) {
-    list.innerHTML = Object.entries(merged).map(([sub, val]) => {
-      const hasData = val !== null && val !== undefined;
-      const pct = hasData ? val : 0;
-      const color = pct < 60 ? '#ef4444' : pct >= 80 ? '#22c55e' : '#1a1a2e';
-      return `
-        <div class="bar-row">
-          <div class="bar-label">${sub}</div>
-          <div class="bar-track">
-            ${hasData
-              ? `<div class="bar-fill" style="width:${pct}%;background:${color}"></div>`
-              : `<div style="width:100%;height:100%;display:flex;align-items:center;padding-left:8px;font-size:10px;color:#9ca3af">尚無資料</div>`
-            }
-          </div>
-          <div class="bar-pct" style="color:${hasData ? (pct<60?'#ef4444':color) : '#9ca3af'}">${hasData ? pct + '%' : '—'}</div>
-        </div>
-      `;
-    }).join('');
+    list.innerHTML = barData.map(b => `
+      <div class="bar-row">
+        <div class="bar-label">${b.sub}</div>
+        <div class="bar-track"><div class="bar-fill" style="width:${b.val}%;background:${b.color}"></div></div>
+        <div class="bar-pct" style="color:${b.val<60?'#ef4444':b.color}">${b.val}%</div>
+      </div>
+    `).join('');
   }
 }
 
+// ★ AI 週報非同步載入（不阻塞主渲染）
+async function loadAIWeeklyReport(db, completionRate, fallbackText) {
+  const pText = document.getElementById('p-ai-report-text');
+  if (!pText) return;
+
+  const skipped = db.tasks.filter(t => t.status === 'skipped').map(t => t.subject).join('、');
+  const grade = db.profile?.grade || '5';
+  // 動態計算各科正確率（從 barData 取得，或使用 db 中儲存的資料）
+  const accuracyMap = db.subjectAccuracy || { '英語': 44, '數學': 84, '國語': 90, '自然': 85, '社會': 78 };
+  const accuracy = Object.entries(accuracyMap).map(([s, v]) => `${s}:${v}%`).join('、');
+
+  const prompt = `你是 LearnMate 學習助理，請根據以下數據，用繁體中文寫一段 80-100 字的家長學習週報（溫暖專業語氣）。
+包含：1.整體表現摘要 2.一個具體可執行的建議。
+不要出現「AI」字樣，語氣像親切老師對家長說話。
+學生：${db.childName}，${grade}年級 | 完成率：${completionRate}% | 各科正確率：${accuracy} | 跳過科目：${skipped || '無'} | 已有加強題：${db.extraTasks?.length > 0 ? '是' : '否'}
+只回傳週報文字，不要 JSON 也不要標題。`;
+
+  // 先顯示 loading 提示
+  pText.innerHTML = `<span style="opacity:0.5;font-size:11px">✨ AI 正在生成週報...</span>`;
+
+  const result = await callGeminiAPI(prompt);
+  if (result && pText) {
+    pText.innerHTML = result;
+    // 更新徽章標籤
+    const badgeEl = document.querySelector('#screen-parent-insights .ai-report div:first-child');
+    if (badgeEl) badgeEl.textContent = 'AI 週報 · Gemini 生成';
+  } else if (pText) {
+    pText.innerHTML = fallbackText;
+  }
 }
 
 function fillMsg(text) { document.getElementById('msg-input').value = text; }
-async function sendMsg() {
+function sendMsg() {
   const text = document.getElementById('msg-input').value;
   if(!text.trim()) return;
-  try {
-    await fetch(`${API_BASE}/messages/send`, {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ familyId: currentFamilyId, text })
-    });
-    document.getElementById('msg-input').value = '';
-    const sent = document.getElementById('msg-sent');
-    sent.style.display = 'block';
-    setTimeout(() => sent.style.display = 'none', 3000);
-    syncAndRender();
-  } catch(e) { console.error('Send Msg Error', e); }
+  const db = getDB();
+  db.messages.push(text);
+  saveDB(db);
+  document.getElementById('msg-input').value = '';
+  const sent = document.getElementById('msg-sent');
+  sent.style.display = 'block';
+  setTimeout(() => sent.style.display = 'none', 3000);
 }
 
 function fillTopic(subject, topic) { 
   document.getElementById('topic-subject').value = subject;
   document.getElementById('topic-input').value = topic; 
 }
-// --- 高擬真度 Mock 考題生成器 ---
-async function fetchAIQuestions(subject, topic, count=5) {
-  // 模擬網路延遲
-  await new Promise(r => setTimeout(r, 1500));
-  
+// --- AI 考題生成器 (Gemini + Mock Fallback) ---
+async function fetchAIQuestions(subject, topic, count = 5) {
   const db = getDB();
-  const edition = db.profile.editions[subject] || '通用版';
-  const grade = db.profile.grade;
-  
-  // 根據科目動態生成假資料
+  const edition = db.profile?.editions?.[subject] || '通用版';
+  const grade = db.profile?.grade || '5';
+
+  // 嘗試真實 Gemini API
+  const prompt = `你是一位專業的台灣小學${grade}年級${subject}老師，使用${edition}教材。
+請根據單元主題「${topic}」，生成 ${count} 題繁體中文單選練習題。
+嚴格規則：1.每題符合${grade}年級程度 2.選項4個，僅1個正確，索引從0 3.解析30字內 4.只回傳JSON陣列
+格式：[{"q":"題目","opts":["A","B","C","D"],"a":0,"exp":"解析"}]`;
+
+  const rawText = await callGeminiAPI(prompt);
+  if (rawText) {
+    try {
+      const parsed = JSON.parse(rawText);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.slice(0, count).map(q => ({ q: q.q, opts: q.opts, a: q.a, exp: q.exp || '太棒了！', aiGenerated: true }));
+      }
+    } catch(e) { console.warn('JSON 解析失敗，切換 mock'); }
+  }
+
+  // Fallback mock 題庫
+  await new Promise(r => setTimeout(r, 800));
   const pool = [];
-  
-  if(subject === '英語') {
+  if (subject === '英語') {
     pool.push({ q: 'Which sentence is correct?', opts: ['I am play.', 'I playing.', 'I am playing.', 'I plays.'], a: 2, exp: '現在進行式 = be動詞 + V-ing。' });
     pool.push({ q: 'He ___ TV now.', opts: ['watch', 'watching', 'is watching', 'are watching'], a: 2, exp: '主詞 He 用 is。' });
     pool.push({ q: 'They ___ (run) in the park.', opts: ['running', 'are running', 'is running', 'run'], a: 1, exp: '主詞 They 用 are。' });
-    pool.push({ q: '___ she reading a book?', opts: ['Is', 'Are', 'Do', 'Does'], a: 0, exp: '現在進行式疑問句把 be 動詞移到前面。' });
+    pool.push({ q: '___ she reading a book?', opts: ['Is', 'Are', 'Do', 'Does'], a: 0, exp: '疑問句把 be 動詞移到前面。' });
     pool.push({ q: 'I ___ not crying.', opts: ['is', 'are', 'am', 'do'], a: 2, exp: '主詞 I 搭配 am。' });
-  } else if(subject === '數學') {
+  } else if (subject === '數學') {
     pool.push({ q: '1/2 + 1/3 = ?', opts: ['2/5', '1/6', '5/6', '1/5'], a: 2, exp: '通分為 3/6 + 2/6 = 5/6。' });
-    pool.push({ q: '3/4 - 1/2 = ?', opts: ['1/4', '2/4', '1/2', '2/2'], a: 0, exp: '通分為 3/4 - 2/4 = 1/4。' });
-    pool.push({ q: '小明有 1 又 1/2 塊披薩，吃了 3/4 塊，還剩幾塊？', opts: ['1/4', '3/4', '1/2', '1'], a: 1, exp: '3/2 - 3/4 = 6/4 - 3/4 = 3/4。' });
-    pool.push({ q: '5/8 + 3/8 = ?', opts: ['8/16', '1', '2', '8/8'], a: 1, exp: '分子相加為 8/8 = 1。' });
-  } else if(subject === '自然') {
+    pool.push({ q: '3/4 − 1/2 = ?', opts: ['1/4', '2/4', '1/2', '2/2'], a: 0, exp: '通分為 3/4 − 2/4 = 1/4。' });
+    pool.push({ q: '小明有 1½ 塊披薩，吃了 3/4 塊，還剩幾塊？', opts: ['1/4', '3/4', '1/2', '1'], a: 1, exp: '3/2 − 3/4 = 6/4 − 3/4 = 3/4。' });
+    pool.push({ q: '5/8 + 3/8 = ?', opts: ['8/16', '1', '2', '8/8'], a: 1, exp: '分子相加 8/8 = 1。' });
+  } else if (subject === '自然') {
     pool.push({ q: '植物行光合作用需要什麼氣體？', opts: ['氧氣', '二氧化碳', '氮氣', '氫氣'], a: 1, exp: '光合作用吸收二氧化碳，釋放氧氣。' });
-    pool.push({ q: '哪一部分負責吸收水分？', opts: ['葉子', '莖', '根', '花'], a: 2, exp: '根部負責從土壤中吸收水分。' });
-    pool.push({ q: '植物的「血管」是哪部分？', opts: ['葉脈', '維管束', '表皮', '氣孔'], a: 1, exp: '維管束負責輸送水分和養分。' });
+    pool.push({ q: '哪一部分負責吸收水分？', opts: ['葉子', '莖', '根', '花'], a: 2, exp: '根部從土壤吸收水分。' });
+    pool.push({ q: '植物的「血管」是哪部分？', opts: ['葉脈', '維管束', '表皮', '氣孔'], a: 1, exp: '維管束輸送水分和養分。' });
   } else {
-    // 通用
-    for(let i=0; i<count; i++){
-      pool.push({ q: `這是關於「${topic}」的第 ${i+1} 題（${edition} 小學${grade}年級）`, opts: ['選項A', '選項B', '選項C', '選項D'], a: 0, exp: 'AI 生成解析。' });
+    for (let i = 0; i < count; i++) {
+      pool.push({ q: `關於「${topic}」第 ${i+1} 題（${edition} ${grade}年級）`, opts: ['選項A', '選項B', '選項C', '選項D'], a: 0, exp: 'Mock 示範題。' });
     }
   }
-
-  // 隨機打亂並取 count 題
   const shuffled = pool.sort(() => 0.5 - Math.random());
-  return shuffled.slice(0, count).map(q => ({
-    q: q.q, opts: q.opts, a: q.a, exp: q.exp || '太棒了！'
-  }));
+  return shuffled.slice(0, count).map(q => ({ q: q.q, opts: q.opts, a: q.a, exp: q.exp || '太棒了！', aiGenerated: false }));
 }
 
 let mockGeneratedQuiz = [];
 async function generateQuiz() {
   const topic = document.getElementById('topic-input').value;
   const subject = document.getElementById('topic-subject').value;
-  if(!topic.trim()) return alert('請輸入主題');
-  
+  if (!topic.trim()) return alert('請輸入主題');
+
   const btn = document.getElementById('gen-btn');
-  btn.disabled = true; btn.textContent = 'AI 思考中...';
-  
+  btn.disabled = true;
+  btn.textContent = '✨ Gemini AI 生成中...';
+
   try {
-    const res = await fetch(`${API_BASE}/tasks/generate`, {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ 
-        familyId: currentFamilyId, subject, topic, 
-        grade: globalDB.profile.grade, edition: globalDB.profile.editions[subject] || '通用版' 
-      })
-    });
-    const data = await res.json();
-    
-    btn.disabled = false; btn.textContent = '從題庫生成 →';
-    
-    if(data.success) {
-      alert('AI 考題生成完畢並已自動派發給學生！');
-      document.getElementById('topic-input').value = '';
-      syncAndRender();
-    } else { alert('生成失敗'); }
-  } catch(e) {
-    btn.disabled = false; btn.textContent = '重試生成';
+    mockGeneratedQuiz = await fetchAIQuestions(subject, topic, 4);
+    const isAI = mockGeneratedQuiz[0]?.aiGenerated;
+
+    btn.disabled = false;
+    btn.textContent = isAI ? '重新生成 (Gemini AI) →' : '重新生成 →';
+    document.getElementById('preview-box').style.display = 'block';
+    document.getElementById('published-box').style.display = 'none';
+
+    const list = document.getElementById('quiz-preview-list');
+    const badge = isAI
+      ? `<span style="background:#e8f5e9;color:#2d4a3e;font-size:9px;font-weight:500;padding:2px 7px;border-radius:8px;margin-left:6px">✨ Gemini AI 生成</span>`
+      : `<span style="background:#f3f4f6;color:#6b7280;font-size:9px;padding:2px 7px;border-radius:8px;margin-left:6px">Mock 模式</span>`;
+    list.innerHTML = `<div style="margin-bottom:8px">${badge}</div>` + mockGeneratedQuiz.map((mq, i) => `
+      <div class="pq"><div class="pq-num">Q${i+1}</div><div class="pq-q">${mq.q}</div>
+        ${mq.opts.map((opt, j) => `<div class="pq-opt ${j===mq.a?'correct-opt':''}">${String.fromCharCode(65+j)}. ${opt} ${j===mq.a?'✓':''}</div>`).join('')}
+        <div style="font-size:10px;color:#888;margin-top:4px;border-top:1px dashed #ddd;padding-top:4px">解析: ${mq.exp}</div>
+      </div>
+    `).join('');
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = '重試生成';
     alert('生成失敗，請再試一次。');
   }
 }
@@ -418,22 +447,15 @@ function renderParentSettings(db) {
   });
 }
 
-async function saveSettings() {
-  const grade = document.getElementById('set-grade').value;
-  const editions = {};
+function saveSettings() {
+  const db = getDB();
+  db.profile.grade = document.getElementById('set-grade').value;
   ['國語','數學','社會','自然','英語'].forEach(sub => {
     const el = document.getElementById(`set-ed-${sub}`);
-    if(el) editions[sub] = el.value;
+    if(el) db.profile.editions[sub] = el.value;
   });
-  
-  try {
-    await fetch(`${API_BASE}/profile/update`, {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ familyId: currentFamilyId, grade, editions })
-    });
-    alert('設定已儲存！');
-    syncAndRender();
-  } catch(e) { alert('儲存失敗'); }
+  saveDB(db);
+  alert('設定已儲存！');
 }
 
 function renderParentRewards(db) {
@@ -494,58 +516,62 @@ function renderParentRewards(db) {
   list.innerHTML = html;
 }
 
-async function approveProposal(id) {
+function approveProposal(id) {
   const pts = prompt('請設定這個獎勵需要的點數 (例如: 200)');
   if(pts) {
     const db = getDB();
     const r = db.rewards.find(x => x.id === id);
     if(r) { 
-      const defaultMsg = `太棒了！爸媽同意了你的新獎勵「${r.icon} ${r.name}」，目標是 ${pts} 點，繼續加油喔！`;
+      r.status = 'ready'; 
+      r.cost = parseInt(pts, 10); 
+      const defaultMsg = `太棒了！爸媽同意了你的新獎勵「${r.icon} ${r.name}」，目標是 ${r.cost} 點，繼續加油喔！`;
       const msg = prompt('要順便留言給孩子嗎？', defaultMsg);
-      // 因為沒有獨立的 approveProposal API，我們直接用現成的 approve 機制，或者稍微修改邏輯
-      // 不過沒關係，由於我們還沒寫專屬的設定點數 API，為了簡單起見，明天我們可以再補上。
-      // 這裡先放著，我明天幫您補齊！
-      alert('請等待明天工程師補齊這個 API 喔！');
+      if (msg !== null && msg.trim() !== '') db.messages.push(msg);
+      saveDB(db); 
+      renderParentRewards(db); 
+      alert('設定完成！即將切換回學生端看結果。');
+      switchToStudentRewards();
     }
   }
 }
-async function rejectProposal(id) { alert('請等待明天工程師補齊這個 API 喔！'); }
-async function approveRedeem(reqId) {
+function rejectProposal(id) {
+  const msg = prompt('請告訴孩子為什麼婉拒這個提議？(例如：這個不適合現在)');
   const db = getDB();
-  const req = db.rewardRequests.find(x => x._id === reqId || x.id === reqId);
+  const r = db.rewards.find(x => x.id === id);
+  if (msg && msg.trim() !== '' && r) db.messages.push(`關於「${r.icon} ${r.name}」的許願：${msg}`);
+  db.rewards = db.rewards.filter(x => x.id !== id);
+  saveDB(db); renderParentRewards(db);
+}
+function approveRedeem(reqId) {
+  const db = getDB();
+  const req = db.rewardRequests.find(x => x.id === reqId);
   if(req) { 
-    const r = db.rewards.find(x => x.id === req.rewardId || x._id === req.rewardId);
+    req.status = 'approved'; 
+    const r = db.rewards.find(x => x.id === req.rewardId);
     if(r) {
       const defaultMsg = `恭喜！爸媽同意了你的兌換「${r.icon} ${r.name}」，請去跟爸媽領取獎勵吧！`;
       const msg = prompt('要順便留個言給孩子嗎？', defaultMsg);
-      
-      try {
-        await fetch(`${API_BASE}/rewards/approve`, {
-          method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ familyId: currentFamilyId, rewardId: r._id, requestId: req._id, action: 'approve', message: msg })
-        });
-        alert('已同意兌換！即將切換回學生端看結果。'); 
-        await syncAndRender();
-        switchToStudentRewards();
-      } catch(e) { alert('操作失敗'); }
+      if (msg !== null && msg.trim() !== '') db.messages.push(msg);
     }
+    saveDB(db); 
+    renderParentRewards(db); 
+    alert('已同意兌換！即將切換回學生端看結果。'); 
+    switchToStudentRewards();
   }
 }
-async function rejectRedeem(reqId) {
+function rejectRedeem(reqId) {
   const msg = prompt('請告訴孩子為什麼婉拒這個兌換？(例如：今天太晚了，明天再換)');
   if (msg !== null) {
     const db = getDB();
-    const req = db.rewardRequests.find(x => x._id === reqId || x.id === reqId);
+    const req = db.rewardRequests.find(x => x.id === reqId);
     if(req) {
-      const r = db.rewards.find(x => x.id === req.rewardId || x._id === req.rewardId);
-      try {
-        await fetch(`${API_BASE}/rewards/approve`, {
-          method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ familyId: currentFamilyId, rewardId: r._id, requestId: req._id, action: 'reject', message: msg })
-        });
-        alert('已婉拒，點數已退還！');
-        syncAndRender();
-      } catch(e) { alert('操作失敗'); }
+      const r = db.rewards.find(x => x.id === req.rewardId);
+      if (msg.trim() !== '' && r) db.messages.push(`關於「${r.icon} ${r.name}」的兌換：${msg}`);
+      if(r) db.points += r.cost; // Refund points
+      db.rewardRequests = db.rewardRequests.filter(x => x.id !== reqId);
+      saveDB(db);
+      renderParentRewards(db);
+      alert('已婉拒，點數已退還！');
     }
   }
 }
@@ -723,47 +749,35 @@ function renderStudentRewards(db) {
   list.innerHTML = html;
 }
 
-async function useApprovedReward(reqId) {
+function useApprovedReward(reqId) {
   const db = getDB();
-  const req = db.rewardRequests.find(r => r._id === reqId || r.id === reqId);
-  if(req) {
-    try {
-      await fetch(`${API_BASE}/rewards/use`, {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ rewardId: req.rewardId, requestId: req._id || req.id })
-      });
-      syncAndRender();
-    } catch(e) { console.error(e); }
-  }
+  db.rewardRequests = db.rewardRequests.filter(req => req.id !== reqId);
+  saveDB(db);
+  renderStudentRewards(db);
 }
 
-async function claimReward(id) {
+function claimReward(id) {
   const db = getDB();
-  const reward = db.rewards.find(r => r._id === id || r.id === id);
+  const reward = db.rewards.find(r => r.id === id);
   if(reward && db.points >= reward.cost) {
-    try {
-      await fetch(`${API_BASE}/rewards/claim`, {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ familyId: currentFamilyId, rewardId: reward._id })
-      });
-      alert('已送出兌換申請！爸媽會收到通知。');
-      syncAndRender();
-    } catch(e) { alert('申請失敗'); }
+    db.points -= reward.cost;
+    db.rewardRequests.push({ id: Date.now(), rewardId: id, date: new Date().toISOString(), status: 'pending' });
+    db.alerts.unshift({ id: Date.now(), type: 'positive', title: `🎁 兌換申請：${reward.name}`, desc: `孩子花費了 ${reward.cost} 點申請兌換「${reward.icon} ${reward.name}」，請前往獎勵設定審核。` });
+    saveDB(db);
+    renderStudentRewards(db);
+    alert('已送出兌換申請！爸媽會收到通知。');
   }
 }
 
-async function proposeReward() {
+function proposeReward() {
   const name = prompt('你想新增什麼獎勵？');
   if(!name) return;
   const icon = prompt('選一個表情符號代表它？', '🎁') || '🎁';
-  try {
-    await fetch(`${API_BASE}/rewards/propose`, {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ familyId: currentFamilyId, name, icon })
-    });
-    alert('提議已送出！等待爸媽同意並設定點數。');
-    syncAndRender();
-  } catch(e) { alert('許願失敗'); }
+  const db = getDB();
+  db.rewards.push({ id: Date.now(), name, icon, cost: 0, proposedBy: 'student', status: 'proposed' });
+  db.alerts.unshift({ id: Date.now(), type: 'positive', title: `✨ 新獎勵許願：${name}`, desc: `孩子提議將「${icon} ${name}」加入獎勵清單，前往設定這需要多少點數吧！` });
+  saveDB(db);
+  alert('提議已送出！等待爸媽同意並設定點數。');
 }
 
 function renderStudentExtra(db) {
@@ -796,53 +810,32 @@ const MOCK_QUESTIONS = [
   { q:'以下哪個句子是錯誤的？', opts:['She is dancing.','We are playing.','He are reading.','I am writing.'], a:2, exp:'主詞 He 應用 is 而非 are。' }
 ];
 
-// ★ startQuiz 改為 async，先顯示 loading，再從後端取得 AI 題目
 async function startQuiz(taskId, subject) {
   const db = getDB();
-  const task = db.tasks.find(t => t.id === taskId || t._id === taskId);
+  const task = db.tasks.find(t => t.id === taskId);
   const topic = task ? task.topic : subject;
 
+  // 先切換畫面，顯示 loading
   document.getElementById('s-quiz-subject').textContent = subject;
   activeQuiz = { type: 'daily', id: taskId, questions: [], currentIdx: 0 };
   navTo('screen-student-quiz');
 
   // 顯示 loading 狀態
-  document.getElementById('qtext').textContent = '✨ AI 正在依據教材版本生成專屬題目...';
+  document.getElementById('qtext').textContent = '✨ AI 正在為你生成專屬題目...';
   document.getElementById('opts').innerHTML = `
     <div style="text-align:center;padding:20px;color:#9ca3af;font-size:12px">
       <div style="font-size:24px;margin-bottom:8px">🤖</div>
-      Gemini AI 依據 ${db.profile?.grade || '5'} 年級教材生成中...
+      Gemini AI 依據你的教材版本生成中...
     </div>`;
   document.getElementById('qdots').innerHTML = '';
   document.getElementById('explain').style.display = 'none';
   document.getElementById('next-btn').style.display = 'none';
   document.getElementById('pts-label').textContent = '準備中...';
 
-  try {
-    const res = await fetch(`${API_BASE}/tasks/generate`, {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        familyId: currentFamilyId, subject, topic,
-        grade: db.profile?.grade || '5',
-        edition: db.profile?.editions?.[subject] || '通用版',
-        count: 5
-      })
-    });
-    const data = await res.json();
-    if (data.success && data.task?.questions?.length > 0) {
-      activeQuiz.questions = data.task.questions;
-      // 如果後端儲存了 task._id，更新 activeQuiz.id
-      if (data.task._id) activeQuiz.id = data.task._id;
-      renderQuizQ();
-    } else {
-      throw new Error('題目資料異常');
-    }
-  } catch(e) {
-    // Fallback: 使用本地 mock 題目
-    console.warn('後端生題失敗，切換 Mock 題目:', e);
-    activeQuiz.questions = await fetchAIQuestions(subject, topic, 5);
-    renderQuizQ();
-  }
+  // 非同步取得 AI 題目
+  const questions = await fetchAIQuestions(subject, topic, 5);
+  activeQuiz.questions = questions;
+  renderQuizQ();
 }
 
 function startExtraQuiz(extraId) {
@@ -856,6 +849,7 @@ function startExtraQuiz(extraId) {
 }
 
 function renderQuizQ() {
+  if (!activeQuiz.questions || activeQuiz.questions.length === 0) return; // AI 尚未載入
   const q = activeQuiz.questions[activeQuiz.currentIdx];
   document.getElementById('qnum').textContent = `QUESTION ${activeQuiz.currentIdx + 1}`;
   document.getElementById('qcounter').textContent = `${activeQuiz.currentIdx + 1} / ${activeQuiz.questions.length} 題`;
@@ -896,9 +890,12 @@ function selectOpt(el, idx) {
     exp.style.cssText = 'display:block;border-left:3px solid #22c55e;border-radius:0 8px 8px 0;background:#F0FFF4;padding:9px 11px;margin-bottom:10px';
     exp.innerHTML = `<div style="font-size:11px;font-weight:500;color:#276749;margin-bottom:3px">答對了！</div><div style="font-size:11px;color:#276749;line-height:1.5">${q.exp}</div>`;
     
-    // Add points locally for UI feedback
+    // Add points
+    const db = getDB();
+    db.points += 2;
+    saveDB(db);
+    
     document.getElementById('pts-label').innerHTML = `+2 點 獲得中...<span class="points-float">+2 點！</span>`;
-    activeQuiz.earnedPoints = (activeQuiz.earnedPoints || 0) + 2;
   } else {
     exp.style.cssText = 'display:block;border-left:3px solid #ef4444;border-radius:0 8px 8px 0;background:#FFF5F5;padding:9px 11px;margin-bottom:10px';
     exp.innerHTML = `<div style="font-size:11px;font-weight:500;color:#9B2C2C;margin-bottom:3px">沒關係，來看看解釋！</div><div style="font-size:11px;color:#9B2C2C;line-height:1.5">${q.exp}</div>`;
@@ -920,29 +917,18 @@ function nextQ() {
   }
 }
 
-async function finishQuiz() {
-  const basePoints = activeQuiz.type === 'daily' ? 10 : 15;
-  const earned = (activeQuiz.earnedPoints || 0) + basePoints;
-  // ★ 計算答對題數（每 +2點 = 答對 1 題）
-  const correctCount = Math.round((activeQuiz.earnedPoints || 0) / 2);
-  const totalCount = activeQuiz.questions.length;
-  const subject = document.getElementById('s-quiz-subject').textContent.replace(' (加強)', '');
-  try {
-    await fetch(`${API_BASE}/tasks/complete`, {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        familyId: currentFamilyId,
-        taskId: activeQuiz.id,
-        pointsToAdd: earned,
-        correctCount,  // ★ 答對題數
-        totalCount,    // ★ 總題數
-        subject        // ★ 科目
-      })
-    });
-    alert(`測驗完成！答對 ${correctCount}/${totalCount} 題，獲得 ${earned} 點！`);
-    await syncAndRender();
-    navTo('screen-student-home');
-  } catch(e) { alert('操作失敗'); }
+function finishQuiz() {
+  const db = getDB();
+  if(activeQuiz.type === 'daily') {
+    const task = db.tasks.find(t => t.id === activeQuiz.id);
+    if(task) { task.status = 'completed'; db.points += 10; }
+  } else {
+    db.extraTasks = db.extraTasks.filter(t => t.id !== activeQuiz.id);
+    db.points += 15;
+  }
+  saveDB(db);
+  alert('測驗完成！獲得大量點數！');
+  navTo('screen-student-home');
 }
 
 function cancelQuiz() {
@@ -978,16 +964,23 @@ function selReason(el, reason) {
   }
 }
 
-async function confirmSkip() {
-  try {
-    await fetch(`${API_BASE}/tasks/skip`, {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ familyId: currentFamilyId, taskId: skipTaskId, reason: skipReason })
-    });
-    alert('已確認暫停。');
-    await syncAndRender();
-    navTo('screen-student-home');
-  } catch(e) { alert('操作失敗'); }
+function confirmSkip() {
+  const db = getDB();
+  db.points = Math.max(0, db.points - 5);
+  const task = db.tasks.find(t => t.id === skipTaskId);
+  if(task) task.status = 'skipped';
+  
+  if(skipReason === '看不懂') {
+    db.alerts.unshift({ id: Date.now(), type: 'critical', title: `${task.subject} — 需要神隊友救援 🚨`, desc: '孩子誠實地表示這科看不懂，這是一個很棒的自我察覺！建議今晚先給他一個擁抱，再一起看看哪裡卡住了。' });
+  } else if(skipReason === '功課太多') {
+    db.alerts.unshift({ id: Date.now(), type: 'warning', title: `${task.subject} — 功課太多暫停`, desc: `孩子覺得學校功課太多，選擇先讓大腦休息。請給予他的時間管理肯定！` });
+  } else {
+    db.alerts.unshift({ id: Date.now(), type: 'warning', title: `${task.subject} — 暫停`, desc: `孩子因為「${skipReason}」暫停了這科。` });
+  }
+  
+  saveDB(db);
+  alert('已確認暫停。');
+  navTo('screen-student-home');
 }
 
 // --- 監聽 Storage 事件，實現跨分頁即時同步 ---
@@ -1000,11 +993,11 @@ window.addEventListener('storage', (e) => {
 });
 
 // =========================================================
-// ★ AI 影片推薦功能（呼叫後端 /api/videos/recommend）
+// ★ AI 影片推薦功能
 // =========================================================
 const SUBJECT_COLORS = { '英語':'#3b82f6','數學':'#f59e0b','自然':'#10b981','國語':'#8b5cf6','社會':'#ef4444' };
 
-async function fetchAPIVideoRecommendations(db) {
+async function fetchAIVideoRecommendations(db) {
   const grade = db.profile?.grade || '5';
   const weakSubjects = db.tasks
     .filter(t => t.status === 'skipped' || t.subject === '英語')
@@ -1013,18 +1006,20 @@ async function fetchAPIVideoRecommendations(db) {
     .join('、') || '英語';
   const topics = db.tasks.map(t => `${t.subject}:${t.topic}`).join('、');
 
-  try {
-    const res = await fetch(`${API_BASE}/videos/recommend`, {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ familyId: currentFamilyId, grade, weakSubjects, topics })
-    });
-    const data = await res.json();
-    if (data.success && Array.isArray(data.videos) && data.videos.length > 0) {
-      return { videos: data.videos, aiGenerated: data.aiGenerated, fromCache: data.fromCache };
-    }
-  } catch(e) { console.warn('影片推薦 API 失敗，切換 fallback:', e); }
+  const prompt = `你是台灣小學${grade}年級學習顧問，請針對以下情況推薦 3 個適合的 YouTube 學習影片主題。
+學生資訊：年級${grade}年級、需加強科目：${weakSubjects}、目前學習：${topics}
+請以 JSON 格式回傳，只回傳 JSON，不要其他文字：
+[{"title":"影片標題（繁體中文，生動有趣）","channel":"推薦頻道名稱","keyword":"YouTube搜尋關鍵字","subject":"科目","duration":"預估時長","desc":"一句話推薦理由"}]`;
 
-  // Fallback 示範資料
+  const rawText = await callGeminiAPI(prompt);
+  if (rawText) {
+    try {
+      const parsed = JSON.parse(rawText);
+      if (Array.isArray(parsed) && parsed.length > 0) return { videos: parsed, aiGenerated: true };
+    } catch(e) { console.warn('影片推薦 JSON 解析失敗'); }
+  }
+
+  // Fallback
   return {
     aiGenerated: false,
     videos: [
@@ -1040,18 +1035,16 @@ function renderStudentVideos(db) {
   if (!list) return;
 
   list.innerHTML = `<div style="text-align:center;padding:28px 0;color:#9ca3af;font-size:12px">
-    <div style="font-size:26px;margin-bottom:8px">✨</div>
+    <div style="font-size:26px;margin-bottom:8px;animation:spin 2s linear infinite">✨</div>
     Gemini AI 正在依據你的學習狀況分析推薦...
   </div>`;
 
-  fetchAPIVideoRecommendations(db).then(({ videos, aiGenerated, fromCache }) => {
-    const badgeText = fromCache ? 'Gemini AI 推薦（快取）' : aiGenerated ? '✨ Gemini AI 個人化推薦' : '示範推薦（離線模式）';
-    const badgeStyle = aiGenerated
-      ? 'background:#e8f5e9;color:#2d4a3e;'
-      : 'background:#f3f4f6;color:#6b7280;';
-    const badge = `<div style="display:inline-block;${badgeStyle}font-size:9px;font-weight:500;padding:3px 9px;border-radius:8px;margin-bottom:12px">${badgeText}</div>`;
+  fetchAIVideoRecommendations(db).then(({ videos, aiGenerated }) => {
+    const badge = aiGenerated
+      ? `<div style="display:inline-block;background:#e8f5e9;color:#2d4a3e;font-size:9px;font-weight:500;padding:3px 9px;border-radius:8px;margin-bottom:12px">✨ Gemini AI 個人化推薦</div>`
+      : `<div style="display:inline-block;background:#f3f4f6;color:#6b7280;font-size:9px;padding:3px 9px;border-radius:8px;margin-bottom:12px">示範推薦（離線模式）</div>`;
 
-    list.innerHTML = badge + videos.map(v => {
+    list.innerHTML = badge + videos.map((v, i) => {
       const color = SUBJECT_COLORS[v.subject] || '#6b7280';
       const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(v.keyword)}`;
       return `
@@ -1084,6 +1077,12 @@ function refreshVideoRecommendations() {
   renderStudentVideos(db);
 }
 
-// 底部導覽列（已改用 flex layout，此函數保留相容性）
-function updateNavPosition() {}
+// =========================================================
+// ★ 底部導覽列（已改用 flex layout，此函數保留相容性）
+// =========================================================
+function updateNavPosition() {
+  // 已改用 CSS flex column layout，不需要 JS 計算位置
+}
+
 window.addEventListener('resize', updateNavPosition);
+window.addEventListener('DOMContentLoaded', () => { setTimeout(updateNavPosition, 100); });

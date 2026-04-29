@@ -24,6 +24,28 @@
       </div>
     </div>
 
+    <!-- Gemini AI Key 輸入區（可折疊） -->
+    <div style="width:100%; max-width: 320px; margin-bottom: 16px;">
+      <div onclick="toggleAIPanel()" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:8px 12px;background:rgba(168,213,181,0.08);border:1px solid rgba(168,213,181,0.2);border-radius:10px;margin-bottom:4px">
+        <div style="display:flex;align-items:center;gap:7px">
+          <span style="font-size:13px">✨</span>
+          <span style="font-size:11px;color:#a8d5b5;font-weight:500">AI 功能設定</span>
+          <span id="ai-status-badge" style="font-size:9px;padding:2px 6px;border-radius:6px;background:rgba(168,213,181,0.25);color:#a8d5b5">✨ AI 模式</span>
+        </div>
+        <span id="ai-panel-arrow" style="font-size:10px;color:#a8d5b5;transition:transform 0.2s">&#9660;</span>
+      </div>
+      <div id="ai-panel" style="display:none;background:rgba(255,255,255,0.04);border-radius:10px;padding:12px;border:1px solid rgba(168,213,181,0.15)">
+        <div style="font-size:10px;color:rgba(232,213,183,0.5);margin-bottom:8px;line-height:1.5">
+          輸入 Google Gemini API Key 即可啟用真實 AI 。無 Key 則使用 Mock 模式展示。
+        </div>
+        <input type="password" id="gemini-key-input" 
+          placeholder="AIzaSy... (可不填，使用 Mock 模式)"
+          style="width:100%;padding:8px;border-radius:7px;border:1px solid rgba(168,213,181,0.25);background:rgba(0,0,0,0.3);color:#e8d5b7;font-size:11px;box-sizing:border-box"
+          oninput="previewKeyStatus(this.value)">
+        <div id="ai-key-hint" style="font-size:10px;color:rgba(232,213,183,0.4);margin-top:6px">登入時自動儲存</div>
+      </div>
+    </div>
+
     <div onclick="loginAsParent()" style="background:#fff;border-radius:16px;padding:16px 20px;width:100%; max-width:320px; margin-bottom:10px;cursor:pointer;position:relative">
       <div style="font-size:22px;margin-bottom:6px">👩‍👦</div>
       <div style="font-size:14px;font-weight:500;color:#0f0f14;margin-bottom:3px">我是家長</div>
@@ -42,8 +64,50 @@
       </div>
     </div>
     
-    <div style="font-size:10px;color:rgba(232,213,183,0.2);margin-top:20px">Demo v1.0 · Local Storage Mode</div>
+    <div style="font-size:10px;color:rgba(232,213,183,0.2);margin-top:20px" id="version-label">Demo v2.0 · AI 加持</div>
   </div>
+
+  <script>
+    // 登入頁 AI 面板控制
+    function toggleAIPanel() {
+      const panel = document.getElementById('ai-panel');
+      const arrow = document.getElementById('ai-panel-arrow');
+      const isOpen = panel.style.display !== 'none';
+      panel.style.display = isOpen ? 'none' : 'block';
+      arrow.style.transform = isOpen ? '' : 'rotate(180deg)';
+      if (!isOpen) {
+        // 面板開啟時自動充填已存的 key
+        const saved = localStorage.getItem('learnmate_gemini_key') || '';
+        const inp = document.getElementById('gemini-key-input');
+        if (saved && !inp.value) inp.value = saved;
+        previewKeyStatus(inp.value);
+      }
+    }
+    function previewKeyStatus(val) {
+      const badge = document.getElementById('ai-status-badge');
+      const hint = document.getElementById('ai-key-hint');
+      // DEFAULT_ACTIVE = 使用內建預設 Key
+      if (val === 'DEFAULT_ACTIVE' || (val && val.trim().length > 10)) {
+        badge.textContent = '✨ AI 模式';
+        badge.style.background = 'rgba(168,213,181,0.25)';
+        badge.style.color = '#a8d5b5';
+        hint.textContent = val === 'DEFAULT_ACTIVE' ? '使用內建 API Key (可自行替換)' : '登入時將自動儲存 API Key';
+      } else {
+        badge.textContent = 'Mock 模式';
+        badge.style.background = 'rgba(107,114,128,0.3)';
+        badge.style.color = '#9ca3af';
+        hint.textContent = '不填則使用內建示範資料';
+      }
+    }
+    // 頁面載入時检查已儲存的 key，或顯示預設 AI 模式狀態
+    window.addEventListener('DOMContentLoaded', () => {
+      const saved = localStorage.getItem('learnmate_gemini_key') || '';
+      const inp = document.getElementById('gemini-key-input');
+      // 預設 key 已內建，所以預設就是 AI 模式
+      inp.value = saved; // 顯示使用者自訂的 key（若有）
+      previewKeyStatus(saved || 'DEFAULT_ACTIVE'); // 觸發 AI 模式顯示
+    });
+  </script>
 
   <!-- App 容器 (登入後顯示) -->
   <div id="app-container" style="display:none; width:100%; height:100%; max-width:400px; margin:0 auto; position:relative; background:#f5f5f0; overflow:hidden;">
@@ -452,24 +516,23 @@
         <div class="p-nav-item" onclick="logout()"><div class="p-nav-icon">🚪</div><div class="p-nav-label">登出</div></div>
       </div>
     </div>
-    
 
-    <!-- S7: AI 推薦影片 ★ 新增 -->
+    <!-- S7: AI 影片推薦 -->
     <div id="screen-student-videos" class="screen s-screen">
-      <div class="p-topbar">
-        <div>
-          <div class="p-topbar-title">📹 AI 推薦影片</div>
-          <div class="p-topbar-sub">依據你的學習狀況個人化推薦</div>
-        </div>
-        <div onclick="refreshVideoRecommendations()" style="background:#f3f4f6;border-radius:16px;padding:4px 10px;cursor:pointer;font-size:10px;color:#6b7280">重新推薦</div>
-      </div>
+      <div class="p-topbar"><div class="p-topbar-title">📹 AI 推薦影片</div></div>
       <div class="p-content">
-        <div style="background:#1a1a2e;border-radius:12px;padding:14px;margin-bottom:12px">
-          <div style="font-size:9px;font-weight:500;color:#a8d5b5;background:rgba(168,213,181,0.15);border-radius:10px;padding:2px 8px;display:inline-block;margin-bottom:8px">✨ GEMINI AI 個人推薦</div>
+        <div style="background:linear-gradient(135deg,#1a1a2e,#2d4a3e);border-radius:12px;padding:13px 14px;margin-bottom:12px">
+          <div style="font-size:9px;font-weight:500;color:#a8d5b5;letter-spacing:.08em;text-transform:uppercase;margin-bottom:5px">✨ Gemini AI 個人化推薦</div>
           <div style="font-size:14px;font-weight:500;color:#e8d5b7;margin-bottom:4px">專屬你的學習影片</div>
           <div style="font-size:11px;color:rgba(232,213,183,0.6);line-height:1.5">依據你的年級、教材版本與弱勢科目，AI 幫你挑好了！</div>
         </div>
-        <div id="s-videos-list"></div>
+        <div id="s-videos-list">
+          <div style="text-align:center;padding:36px 0;color:#9ca3af;font-size:12px">
+            <div style="font-size:28px;margin-bottom:10px">⌛</div>
+            <div>AI 正在分析你的學習狀況...</div>
+          </div>
+        </div>
+        <button onclick="refreshVideoRecommendations()" style="width:100%;margin-top:10px;background:transparent;border:1px dashed #d1d5db;border-radius:20px;padding:9px;font-size:11px;color:#6b7280;cursor:pointer">🔄 重新推薦</button>
       </div>
       <div class="p-bottom-nav">
         <div class="p-nav-item" onclick="navTo('screen-student-home')"><div class="p-nav-icon">🏠</div><div class="p-nav-label">基地</div></div>
@@ -480,9 +543,9 @@
         <div class="p-nav-item" onclick="logout()"><div class="p-nav-icon">🚪</div><div class="p-nav-label">登出</div></div>
       </div>
     </div>
+    
+  </div>
 
-  </div><!-- /app-container -->
-
-  <script src="app_api.js?v=5"></script>
+  <script src="app_final.js"></script>
 </body>
 </html>

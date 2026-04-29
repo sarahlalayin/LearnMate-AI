@@ -1,0 +1,12 @@
+# 環境變數（含所有 API Key）- 絕不上傳 Git
+.env
+backend/.env
+
+# Node.js
+node_modules/
+backend/node_modules/
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
