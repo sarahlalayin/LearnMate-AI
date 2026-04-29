@@ -561,8 +561,14 @@ function switchToStudentRewards() {
 
 // --- 學生端邏輯 ---
 function renderStudentHome(db) {
+  // ★ 動態顯示姓名與年級，讓學生知道目前的設定
+  const gradeStr = db.profile && db.profile.grade ? db.profile.grade : '5';
+  document.getElementById('s-greeting').textContent = `嗨！${db.childName || ''} (${gradeStr}年級)`;
+  const firstChar = db.childName ? db.childName.charAt(0) : '學';
+  document.getElementById('s-avatar-text').textContent = firstChar;
+
   document.getElementById('s-streak-days').textContent = db.streak;
-  
+
   const completed = db.tasks.filter(t => t.status === 'completed').length;
   const total = db.tasks.length;
   document.getElementById('s-tasks-completed').textContent = completed;
@@ -630,16 +636,18 @@ function renderStudentChoose(db) {
   list.innerHTML = pending.map(t => {
     let icon = '📖';
     if(t.subject==='數學') icon='🔢'; else if(t.subject==='社會') icon='🌍'; else if(t.subject==='英語') icon='💬'; else if(t.subject==='自然') icon='🔬';
+    let edition = db.profile && db.profile.editions ? db.profile.editions[t.subject] || '通用版' : '通用版';
     return `
       <div class="drag-card" onclick="startQuiz(${t.id}, '${t.subject}')">
         <div style="font-size:15px;color:#d1d5db;padding-right:2px">⋮⋮</div>
         <div class="subj-icon" style="background:#f3f4f6;width:34px;height:34px"><span style="font-size:15px">${icon}</span></div>
-        <div style="flex:1"><div style="font-size:13px;font-weight:500;color:#0f0f14">${t.subject} · ${t.topic}</div></div>
+        <div style="flex:1"><div style="font-size:13px;font-weight:500;color:#0f0f14">${t.subject} · ${t.topic}</div><div style="font-size:10px;color:#9ca3af">${edition}</div></div>
         <div class="p-btn p-btn-dark" style="font-size:11px;padding:5px 10px">開始</div>
       </div>
     `;
   }).join('');
 }
+
 
 function renderStudentRewards(db) {
   document.getElementById('s-rewards-pts').textContent = db.points;
@@ -807,11 +815,13 @@ async function startQuiz(taskId, subject) {
   navTo('screen-student-quiz');
 
   // 顯示 loading 狀態
-  document.getElementById('qtext').textContent = '✨ AI 正在依據教材版本生成專屬題目...';
+  document.getElementById('qtext').textContent = '✨ AI 正在依據您的專屬教材生成題目...';
+  const gradeStr = db.profile && db.profile.grade ? db.profile.grade : '5';
+  const editionStr = db.profile && db.profile.editions && db.profile.editions[subject] ? db.profile.editions[subject] : '通用版';
   document.getElementById('opts').innerHTML = `
     <div style="text-align:center;padding:20px;color:#9ca3af;font-size:12px">
       <div style="font-size:24px;margin-bottom:8px">🤖</div>
-      Gemini AI 依據 ${db.profile?.grade || '5'} 年級教材生成中...
+      Gemini AI 依據 ${gradeStr}年級 ${editionStr} 教材生成中...
     </div>`;
   document.getElementById('qdots').innerHTML = '';
   document.getElementById('explain').style.display = 'none';
