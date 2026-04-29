@@ -42,7 +42,9 @@ const defaultDB = {
   rewardRequests: [] // { id, rewardId, date, status: 'pending'|'approved' }
 };
 
-const API_BASE = 'https://learnmate-ai-j8oq.onrender.com/api';
+// ★ 使用相對路徑：前後端都在同一個 Render 服務上，/api 永遠指向正確的後端
+const API_BASE = '/api';
+
 let globalDB = null;
 let currentFamilyId = null;
 
