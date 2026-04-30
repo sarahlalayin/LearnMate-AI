@@ -1075,13 +1075,14 @@ async function fetchAPIVideoRecommendations(db) {
     }
   } catch(e) { console.warn('影片推薦 API 失敗，切換 fallback:', e); }
 
-  // Fallback 示範資料
+  // Fallback 示範資料（當伺服器斷線或發生預期外錯誤時）
+  const ed = db.profile?.editions || {};
   return {
     aiGenerated: false,
     videos: [
-      { title: '英語現在進行式超簡單！5分鐘學會', channel: '學習王國 LearnKing', keyword: '小學英語現在進行式教學', subject: '英語', duration: '5分鐘', desc: '用生動動畫讓你秒懂 am/is/are + V-ing，例句超豐富！' },
-      { title: '分數加減法圖解教學，披薩不說謊', channel: '數感實驗室', keyword: '小學分數加減法 圖解', subject: '數學', duration: '8分鐘', desc: '用披薩和蛋糕圖解讓分數運算變得超直覺，一看就懂！' },
-      { title: '植物的構造完整講解：根莖葉花果', channel: '科學小達人', keyword: '小學自然 植物構造 教學', subject: '自然', duration: '7分鐘', desc: '根莖葉花果種子一次搞定，附超清晰對照圖！' }
+      { title: `適合 ${grade}年級 的英語動畫教學`, channel: '示範頻道', keyword: `小學 ${grade}年級 英語 ${ed['英語']||''} 教學`, subject: '英語', duration: '5分鐘', desc: `針對 ${grade}年級 程度的英語教學內容` },
+      { title: `適合 ${grade}年級 的數學圖解教學`, channel: '示範頻道', keyword: `小學 ${grade}年級 數學 ${ed['數學']||''} 教學`, subject: '數學', duration: '8分鐘', desc: `針對 ${grade}年級 程度的數學運算解說` },
+      { title: `適合 ${grade}年級 的自然科學重點`, channel: '示範頻道', keyword: `小學 ${grade}年級 自然 ${ed['自然']||''} 教學`, subject: '自然', duration: '7分鐘', desc: `針對 ${grade}年級 程度的自然科學教學` }
     ]
   };
 }

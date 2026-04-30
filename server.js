@@ -43,8 +43,15 @@ async function callGemini(prompt, apiKey) {
     body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
   });
   const data = await resp.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  return text.replace(/```json/g, '').replace(/```/g, '').trim();
+  let text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  // 強化 JSON 擷取，防止 Gemini 回覆夾雜其他說明文字導致 Parse 失敗
+  const match = text.match(/\[[\s\S]*\]|\{[\s\S]*\}/);
+  if (match) {
+    text = match[0];
+  } else {
+    text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+  }
+  return text;
 }
 
 // ── YouTube Data API v3 工具函式 ──────────────────────────
@@ -233,6 +240,16 @@ app.post('/api/videos/recommend', async (req, res) => {
 
     // Step 1：Gemini 生成搜尋關鍵字（不消耗 YouTube Quota）
     const editions = family?.profile?.editions || {};
+    // 將 Map 或 Object 轉為標準 Object，方便取值
+    let editionsObj = {};
+    try {
+      if (editions instanceof Map) {
+        editionsObj = Object.fromEntries(editions);
+      } else {
+        editionsObj = editions;
+      }
+    } catch(e) {}
+
     const prompt = buildVideoPrompt(grade || '5', editions, weakSubjects || '英語', topics || '現在進行式');
     const rawText = await callGemini(prompt);
     let suggestions = null;
@@ -240,12 +257,13 @@ app.post('/api/videos/recommend', async (req, res) => {
       try { suggestions = JSON.parse(rawText); } catch (e) { suggestions = null; }
     }
 
-    // Fallback 關鍵字（Gemini 失敗時）
-    if (!suggestions || !Array.isArray(suggestions)) {
+    // Fallback 關鍵字（Gemini 失敗、限流或沒回傳有效 JSON 時使用）
+    // 這裡同樣綁定真實的「年級」與「版本」，不再使用寫死的假資料
+    if (!suggestions || !Array.isArray(suggestions) || suggestions.length === 0) {
       suggestions = [
-        { keyword: '小學英語現在進行式教學動畫', subject: '英語', desc: '用動畫讓你秒懂 am/is/are + V-ing' },
-        { keyword: '小學數學分數加減法圖解教學', subject: '數學', desc: '用圖解讓分數運算變得超直覺' },
-        { keyword: '小學自然科學植物構造根莖葉', subject: '自然', desc: '根莖葉花果種子一次搞定' }
+        { keyword: `小學 ${grade}年級 英語 ${editionsObj['英語']||''} 教學`, subject: '英語', desc: `適合 ${grade}年級 的英語教學` },
+        { keyword: `小學 ${grade}年級 數學 ${editionsObj['數學']||''} 教學`, subject: '數學', desc: `適合 ${grade}年級 的數學解說` },
+        { keyword: `小學 ${grade}年級 自然 ${editionsObj['自然']||''} 教學`, subject: '自然', desc: `適合 ${grade}年級 的自然教學` }
       ];
     }
 
