@@ -656,8 +656,8 @@ function renderStudentHome(db) {
           <div class="subj-icon" style="background:#FEFCBF"><span style="font-size:15px">${icon}</span></div>
           <div style="flex:1"><div class="subj-name">${t.subject}</div><div class="subj-meta">${t.topic} · ${edition}</div></div>
           <div style="display:flex;gap:5px">
-            <div onclick="startQuiz(${t.id}, '${t.subject}')" class="p-btn p-btn-dark" style="font-size:11px;padding:5px 10px">開始</div>
-            <div onclick="prepSkip(${t.id}, '${t.subject}')" class="p-btn p-btn-ghost" style="font-size:11px;padding:5px 10px">先跳過?</div>
+            <div onclick="startQuiz('${t._id || t.id}', '${t.subject}')" class="p-btn p-btn-dark" style="font-size:11px;padding:5px 10px">開始</div>
+            <div onclick="prepSkip('${t._id || t.id}', '${t.subject}')" class="p-btn p-btn-ghost" style="font-size:11px;padding:5px 10px">先跳過?</div>
           </div>
         </div>
       `;
@@ -679,7 +679,7 @@ function renderStudentChoose(db) {
     if(t.subject==='數學') icon='🔢'; else if(t.subject==='社會') icon='🌍'; else if(t.subject==='英語') icon='💬'; else if(t.subject==='自然') icon='🔬';
     let edition = db.profile && db.profile.editions ? db.profile.editions[t.subject] || '通用版' : '通用版';
     return `
-      <div class="drag-card" onclick="startQuiz(${t.id}, '${t.subject}')">
+      <div class="drag-card" onclick="startQuiz('${t._id || t.id}', '${t.subject}')">
         <div style="font-size:15px;color:#d1d5db;padding-right:2px">⋮⋮</div>
         <div class="subj-icon" style="background:#f3f4f6;width:34px;height:34px"><span style="font-size:15px">${icon}</span></div>
         <div style="flex:1"><div style="font-size:13px;font-weight:500;color:#0f0f14">${t.subject} · ${t.topic}</div><div style="font-size:10px;color:#9ca3af">${edition}</div></div>
@@ -829,7 +829,7 @@ function renderStudentExtra(db) {
           <div style="font-size:13px;font-weight:500;color:#0f0f14;margin-bottom:5px">${t.subject} · ${t.topic}</div>
           <div style="font-size:10px;color:#9ca3af">${t.questions.length} 題 · +15點</div>
         </div>
-        <div onclick="startExtraQuiz(${t.id})" class="p-btn p-btn-green" style="font-size:12px;padding:8px 14px;flex-shrink:0">開始練習</div>
+        <div onclick="startExtraQuiz('${t._id || t.id}')" class="p-btn p-btn-green" style="font-size:12px;padding:8px 14px;flex-shrink:0">開始練習</div>
       </div>
     </div>
   `).join('');
@@ -845,10 +845,9 @@ const MOCK_QUESTIONS = [
   { q:'以下哪個句子是錯誤的？', opts:['She is dancing.','We are playing.','He are reading.','I am writing.'], a:2, exp:'主詞 He 應用 is 而非 are。' }
 ];
 
-// ★ startQuiz 改為 async，先顯示 loading，再從後端取得 AI 題目
 async function startQuiz(taskId, subject) {
   const db = getDB();
-  const task = db.tasks.find(t => t.id === taskId || t._id === taskId);
+  const task = db.tasks.find(t => String(t.id) === String(taskId) || String(t._id) === String(taskId));
   const topic = task ? task.topic : subject;
 
   document.getElementById('s-quiz-subject').textContent = subject;
@@ -898,7 +897,7 @@ async function startQuiz(taskId, subject) {
 
 function startExtraQuiz(extraId) {
   const db = getDB();
-  const task = db.extraTasks.find(t => t.id === extraId);
+  const task = db.extraTasks.find(t => String(t.id) === String(extraId) || String(t._id) === String(extraId));
   if(!task) return;
   document.getElementById('s-quiz-subject').textContent = task.subject + ' (加強)';
   activeQuiz = { type: 'extra', id: extraId, questions: task.questions.map(q => ({q:q.q, opts:q.opts, a:q.a, exp:'很棒！'})), currentIdx: 0 };
