@@ -348,8 +348,23 @@ async function fetchAIQuestions(subject, topic, count = 5) {
   // 嘗試真實 Gemini API
   const prompt = `你是一位專業的台灣小學${grade}年級${subject}老師，使用${edition}教材。
 請根據單元主題「${topic}」，生成 ${count} 題繁體中文單選練習題。
-嚴格規則：1.每題符合${grade}年級程度 2.選項4個，僅1個正確，索引從0 3.解析30字內 4.只回傳JSON陣列
-格式：[{"q":"題目","opts":["A","B","C","D"],"a":0,"exp":"解析"}]`;
+
+嚴格規則：
+1. 題目必須符合${grade}年級程度，語氣友善親切。
+2. 必須提供 4 個不同的「實際答案選項內容」，且選項文字不可加上 A/B/C/D 前綴。
+3. 只有 1 個正確答案，正確答案的索引 (a) 必須是 0 到 3 之間的整數。
+4. 必須包含簡短易懂的解析（30字內）。
+5. 必須只回傳 JSON 陣列，絕對不能包含任何 Markdown 語法或說明文字。
+
+JSON 格式範例：
+[
+  {
+    "q": "這是一道測驗題目？",
+    "opts": ["選項內容一", "選項內容二", "選項內容三", "選項內容四"],
+    "a": 1,
+    "exp": "因為這是正確的解釋。"
+  }
+]`;
 
   const rawText = await callGeminiAPI(prompt);
   if (rawText) {
