@@ -8,7 +8,7 @@ const defaultDB = {
   childName: '小明',
   profile: {
     level: 'elementary', // 'elementary' or 'junior_high'
-    grade: '5',
+    grade: '6',
     editions: {
       '國語': '南一版',
       '數學': '康軒版',
@@ -19,7 +19,7 @@ const defaultDB = {
   },
   tasks: [
     { id: 1, subject: '國語', topic: '第十課', status: 'completed', points: 10 },
-    { id: 2, subject: '數學', topic: '分數加減', status: 'completed', points: 10 },
+    { id: 2, subject: '數學', topic: '第一~六單元總複習', status: 'completed', points: 10 },
     { id: 3, subject: '社會', topic: '台灣歷史', status: 'completed', points: 10 },
     { id: 4, subject: '英語', topic: '現在進行式', status: 'pending', points: 10 },
     { id: 5, subject: '自然', topic: '植物的構造', status: 'pending', points: 10 }
@@ -342,10 +342,11 @@ async function fetchAIQuestions(subject, topic, count=5) {
     pool.push({ q: '___ she reading a book?', opts: ['Is', 'Are', 'Do', 'Does'], a: 0, exp: '現在進行式疑問句把 be 動詞移到前面。' });
     pool.push({ q: 'I ___ not crying.', opts: ['is', 'are', 'am', 'do'], a: 2, exp: '主詞 I 搭配 am。' });
   } else if(subject === '數學') {
-    pool.push({ q: '1/2 + 1/3 = ?', opts: ['2/5', '1/6', '5/6', '1/5'], a: 2, exp: '通分為 3/6 + 2/6 = 5/6。' });
-    pool.push({ q: '3/4 - 1/2 = ?', opts: ['1/4', '2/4', '1/2', '2/2'], a: 0, exp: '通分為 3/4 - 2/4 = 1/4。' });
-    pool.push({ q: '小明有 1 又 1/2 塊披薩，吃了 3/4 塊，還剩幾塊？', opts: ['1/4', '3/4', '1/2', '1'], a: 1, exp: '3/2 - 3/4 = 6/4 - 3/4 = 3/4。' });
-    pool.push({ q: '5/8 + 3/8 = ?', opts: ['8/16', '1', '2', '8/8'], a: 1, exp: '分子相加為 8/8 = 1。' });
+    pool.push({ q: '計算 10 + 6 x 2 的值是多少？', opts: ['32', '28', '20', '22'], a: 3, exp: '四則混合運算要先乘除後加減。' });
+    pool.push({ q: '小明每分鐘走 71 公尺，走了 5 分鐘，共走幾公尺？', opts: ['284', '360', '355', '76'], a: 2, exp: '距離 = 速率 x 時間。' });
+    pool.push({ q: '一個長方體長 11 公分、寬 5 公分、高 9 公分，體積是多少立方公分？', opts: ['500', '495', '64', '486'], a: 1, exp: '長方體體積 = 長 x 寬 x 高。' });
+    pool.push({ q: '以 330 為基準量，若比較量是基準量的 40%，比較量是多少？', opts: ['132', '370', '290', '152'], a: 0, exp: '比較量 = 基準量 x 百分率。' });
+    pool.push({ q: '有 7 件上衣和 4 件褲子，每次各選一件，共有幾種搭配方式？', opts: ['11', '35', '27', '28'], a: 3, exp: '搭配問題可用乘法原理。' });
   } else if(subject === '自然') {
     pool.push({ q: '植物行光合作用需要什麼氣體？', opts: ['氧氣', '二氧化碳', '氮氣', '氫氣'], a: 1, exp: '光合作用吸收二氧化碳，釋放氧氣。' });
     pool.push({ q: '哪一部分負責吸收水分？', opts: ['葉子', '莖', '根', '花'], a: 2, exp: '根部負責從土壤中吸收水分。' });

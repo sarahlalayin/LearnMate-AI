@@ -165,10 +165,10 @@ app.post('/api/auth/login', async (req, res) => {
     const { familyCode } = req.body;
     let family = await Family.findOne({ familyCode });
     if (!family) {
-      family = await Family.create({ familyCode, childName: '小明', points: 320, streak: 5 });
+      family = await Family.create({ familyCode, childName: '小明', points: 320, streak: 5, profile: { grade: '6', editions: { '數學': '康軒版', '國語': '南一版', '英語': '康軒版', '社會': '翰林版', '自然': '翰林版' } } });
       await Task.insertMany([
         { familyId: family._id, subject: '國語', topic: 'L5 詞語複習', type: 'daily', totalQuestions: 5 },
-        { familyId: family._id, subject: '數學', topic: '分數加減', type: 'daily', totalQuestions: 5 },
+        { familyId: family._id, subject: '數學', topic: '第一~六單元總複習', type: 'daily', totalQuestions: 5 },
         { familyId: family._id, subject: '英語', topic: '現在進行式', type: 'daily', totalQuestions: 5 },
         { familyId: family._id, subject: '自然', topic: '植物的構造', type: 'daily', totalQuestions: 5 },
         { familyId: family._id, subject: '社會', topic: '台灣地理', type: 'daily', totalQuestions: 5 }
@@ -209,12 +209,22 @@ app.post('/api/tasks/generate', async (req, res) => {
 
     // Fallback mock questions
     if (!questions || !Array.isArray(questions) || questions.length === 0) {
-      questions = Array.from({ length: count }, (_, i) => ({
-        q: `【${subject}】關於「${topic}」的第 ${i + 1} 題`,
-        opts: ['選項 A', '選項 B', '選項 C', '選項 D'],
-        a: 0,
-        exp: `正確答案是選項 A。（離線示範題）`
-      }));
+      if (subject === '數學' && (edition === '康軒版' || edition === '康軒') && grade === '6') {
+        questions = [
+          { q: "計算 10 + 6 x 2 的值是多少？", opts: ["32", "28", "20", "22"], a: 3, exp: "四則混合運算要先乘除後加減。" },
+          { q: "小明每分鐘走 71 公尺，走了 5 分鐘，共走幾公尺？", opts: ["284", "360", "355", "76"], a: 2, exp: "距離 = 速率 x 時間。" },
+          { q: "一個長方體長 11 公分、寬 5 公分、高 9 公分，體積是多少立方公分？", opts: ["500", "495", "64", "486"], a: 1, exp: "長方體體積 = 長 x 寬 x 高。" },
+          { q: "以 330 為基準量，若比較量是基準量的 40%，比較量是多少？", opts: ["132", "370", "290", "152"], a: 0, exp: "比較量 = 基準量 x 百分率。" },
+          { q: "有 7 件上衣和 4 件褲子，每次各選一件，共有幾種搭配方式？", opts: ["11", "35", "27", "28"], a: 3, exp: "搭配問題可用乘法原理。" }
+        ];
+      } else {
+        questions = Array.from({ length: count }, (_, i) => ({
+          q: `【${subject}】關於「${topic}」的第 ${i + 1} 題`,
+          opts: ['選項 A', '選項 B', '選項 C', '選項 D'],
+          a: 0,
+          exp: `正確答案是選項 A。（離線示範題）`
+        }));
+      }
     }
 
     const newTask = await Task.create({
