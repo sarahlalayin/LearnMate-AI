@@ -371,8 +371,31 @@ async function generateQuiz() {
   const subject = document.getElementById('topic-subject').value;
   if(!topic.trim()) return alert('請輸入主題');
   
+  const db = getDB();
+  const isActivity = db.activities && db.activities.some(a => a.category === subject);
+  
   const btn = document.getElementById('gen-btn');
-  btn.disabled = true; btn.textContent = 'AI 思考中...';
+  btn.disabled = true; 
+  
+  if (isActivity) {
+    btn.textContent = '派發中...';
+    try {
+      await fetch(`${API_BASE}/tasks/create-activity`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ familyId: currentFamilyId, subject, topic })
+      });
+      btn.disabled = false; btn.textContent = '直接派發任務 →';
+      alert('非學科任務已自動派發給學生！');
+      document.getElementById('topic-input').value = '';
+      syncAndRender();
+    } catch(e) {
+      btn.disabled = false; btn.textContent = '重試派發';
+      alert('派發失敗，請再試一次。');
+    }
+    return;
+  }
+  
+  btn.textContent = 'AI 思考中...';
   
   try {
     const res = await fetch(`${API_BASE}/tasks/generate`, {
@@ -414,9 +437,25 @@ function publishQuiz() {
 // --- 派題選單動態生成 ---
 function renderParentMsg(db) {
   const select = document.getElementById('topic-subject');
+  const btn = document.getElementById('gen-btn');
+  
   if (select && db.profile && db.profile.editions) {
     const subs = Object.keys(db.profile.editions);
-    select.innerHTML = subs.map(s => `<option value="${s}">${s}</option>`).join('');
+    const activityCategories = [...new Set((db.activities || []).map(a => a.category))];
+    
+    select.innerHTML = subs.map(s => `<option value="${s}">${s}</option>`).join('') +
+                       activityCategories.map(c => `<option value="${c}">⭐ ${c}</option>`).join('');
+                       
+    select.onchange = (e) => {
+      const isActivity = activityCategories.includes(e.target.value);
+      if(btn) btn.textContent = isActivity ? '直接派發任務 →' : '從題庫生成 →';
+    };
+    
+    // Trigger onchange to set initial button state
+    if(select.value) {
+      const isActivity = activityCategories.includes(select.value);
+      if(btn) btn.textContent = isActivity ? '直接派發任務 →' : '從題庫生成 →';
+    }
   }
 }
 
@@ -914,10 +953,51 @@ function startExtraQuiz(extraId) {
   const db = getDB();
   const task = db.extraTasks.find(t => String(t.id) === String(extraId) || String(t._id) === String(extraId));
   if(!task) return;
+  
+  if (task.questions && task.questions.length === 0) {
+    // Non-academic activity task
+    document.getElementById('s-quiz-subject').textContent = task.subject + ' (任務)';
+    activeQuiz = { type: 'extra', id: extraId, isActivity: true };
+    navTo('screen-student-quiz');
+    
+    document.getElementById('qnum').textContent = `打卡任務`;
+    document.getElementById('qcounter').textContent = ``;
+    document.getElementById('qtext').textContent = `你已經完成「${task.topic}」了嗎？`;
+    document.getElementById('qdots').innerHTML = '';
+    
+    document.getElementById('opts').innerHTML = `
+      <div style="text-align:center; padding: 30px;">
+        <div style="font-size: 50px; margin-bottom: 20px;">🏅</div>
+        <button onclick="finishActivity()" class="p-btn p-btn-green p-btn-lg" style="width: 100%; font-size: 16px;">我完成了！</button>
+      </div>
+    `;
+    document.getElementById('explain').style.display = 'none';
+    document.getElementById('next-btn').style.display = 'none';
+    document.getElementById('pts-label').textContent = '完成可得 15 點';
+    return;
+  }
+  
   document.getElementById('s-quiz-subject').textContent = task.subject + ' (加強)';
   activeQuiz = { type: 'extra', id: extraId, questions: task.questions.map(q => ({q:q.q, opts:q.opts, a:q.a, exp:'很棒！'})), currentIdx: 0 };
   navTo('screen-student-quiz');
   renderQuizQ();
+}
+
+async function finishActivity() {
+  document.getElementById('opts').innerHTML = `<div style="text-align:center;padding:20px;color:#9ca3af;">處理中...</div>`;
+  try {
+    await fetch(`${API_BASE}/tasks/complete`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        familyId: currentFamilyId,
+        taskId: activeQuiz.id,
+        pointsToAdd: 15
+      })
+    });
+    alert(`太棒了！任務打卡成功，獲得 15 點！`);
+    await syncAndRender();
+    navTo('screen-student-home');
+  } catch(e) { alert('操作失敗'); }
 }
 
 function renderQuizQ() {

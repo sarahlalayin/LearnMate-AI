@@ -9,6 +9,8 @@ const Task = require('./models/Task');
 const Reward = require('./models/Reward');
 const Alert = require('./models/Alert');
 const Message = require('./models/Message');
+const Syllabus = require('./models/Syllabus');
+const ActivityTemplate = require('./models/ActivityTemplate');
 
 const app = express();
 app.use(cors());
@@ -96,9 +98,14 @@ async function searchYouTubeVideo(keyword) {
 
 
 // ── Prompts ────────────────────────────────────────────────
-function buildQuizPrompt(subject, topic, grade, edition, count = 5) {
+function buildQuizPrompt(subject, topic, grade, edition, count = 5, syllabusContent = null) {
+  let syllabusInstruction = '';
+  if (syllabusContent) {
+    syllabusInstruction = `\n這學期該版本的課綱內容如下：\n"""\n${syllabusContent}\n"""\n你的出題必須嚴格基於此課綱範圍，不可超出此版本的教學進度。\n`;
+  }
+
   return `你是一位專業的台灣小學${grade}年級${subject}老師，使用${edition}教材。
-請根據單元主題「${topic}」，生成 ${count} 題繁體中文單選練習題。
+請根據單元主題「${topic}」，生成 ${count} 題繁體中文單選練習題。${syllabusInstruction}
 
 嚴格規則：
 1. 題目必須符合${grade}年級程度，語氣友善親切。
@@ -199,7 +206,9 @@ app.get('/api/tasks/:familyId', async (req, res) => {
 app.post('/api/tasks/generate', async (req, res) => {
   try {
     const { subject, topic, grade, edition, familyId, count = 5 } = req.body;
-    const prompt = buildQuizPrompt(subject, topic, grade || '5', edition || '通用版', count);
+    // 查詢該年級科目的課綱
+    const syllabus = await Syllabus.findOne({ grade: grade || '5', subject, edition: edition || '通用版' });
+    const prompt = buildQuizPrompt(subject, topic, grade || '5', edition || '通用版', count, syllabus?.content);
 
     let questions = null;
     const rawText = await callGemini(prompt);
@@ -236,6 +245,25 @@ app.post('/api/tasks/generate', async (req, res) => {
     });
 
     res.json({ success: true, task: newTask, aiGenerated: !!rawText });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 直接派發非學科活動任務 (不呼叫 AI)
+app.post('/api/tasks/create-activity', async (req, res) => {
+  try {
+    const { familyId, subject, topic } = req.body;
+    const newTask = await Task.create({
+      familyId, 
+      type: 'extra', 
+      subject, 
+      topic,
+      totalQuestions: 0,
+      questions: [],
+      aiGenerated: false
+    });
+    res.json({ success: true, task: newTask });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -507,6 +535,77 @@ app.post('/api/tasks/clear-extra', async (req, res) => {
   }
 });
 
+// ==========================================
+// ★ 後台管理系統 API (Admin)
+// ==========================================
+
+// 取得所有課綱
+app.get('/api/admin/syllabus', async (req, res) => {
+  try {
+    const data = await Syllabus.find().sort({ academicYear: -1, grade: 1 });
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 新增或更新課綱
+app.post('/api/admin/syllabus', async (req, res) => {
+  try {
+    const { academicYear, grade, subject, edition, content } = req.body;
+    // 假設同一年級、科目、版本只有一筆
+    const syllabus = await Syllabus.findOneAndUpdate(
+      { academicYear, grade, subject, edition },
+      { content },
+      { new: true, upsert: true }
+    );
+    res.json({ success: true, data: syllabus });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 刪除課綱
+app.delete('/api/admin/syllabus/:id', async (req, res) => {
+  try {
+    await Syllabus.findByIdAndDelete(req.params.id);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 取得所有非學科活動範本
+app.get('/api/admin/activities', async (req, res) => {
+  try {
+    const data = await ActivityTemplate.find().sort({ category: 1 });
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 新增非學科活動範本
+app.post('/api/admin/activities', async (req, res) => {
+  try {
+    const { category, title, defaultPoints } = req.body;
+    const activity = await ActivityTemplate.create({ category, title, defaultPoints });
+    res.json({ success: true, data: activity });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 刪除非學科活動範本
+app.delete('/api/admin/activities/:id', async (req, res) => {
+  try {
+    await ActivityTemplate.findByIdAndDelete(req.params.id);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // 15. 同步完整狀態
 app.get('/api/sync/:familyId', async (req, res) => {
   try {
@@ -518,6 +617,7 @@ app.get('/api/sync/:familyId', async (req, res) => {
     const rewards = await Reward.find({ familyId });
     const alerts = await Alert.find({ familyId }).sort({ createdAt: -1 });
     const messages = await Message.find({ familyId }).sort({ createdAt: 1 });
+    const activities = await ActivityTemplate.find().sort({ category: 1 });
 
     res.json({
       success: true,
@@ -535,7 +635,8 @@ app.get('/api/sync/:familyId', async (req, res) => {
           r.requests.map(req => ({ ...req.toObject(), rewardId: r._id, _id: req._id.toString() }))
         ),
         alerts,
-        messages: messages.map(m => m.text)
+        messages: messages.map(m => m.text),
+        activities
       }
     });
   } catch (error) {

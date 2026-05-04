@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LearnMate 後台管理系統</title>
+  <style>
+    body { font-family: 'Inter', system-ui, sans-serif; background: #f3f4f6; padding: 20px; color: #1a1a2e; }
+    h1 { color: #1a1a2e; text-align: center; }
+    .card { background: #fff; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 20px; }
+    .tabs { display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid #e5e7eb; padding-bottom: 10px; }
+    .tab { padding: 10px 20px; cursor: pointer; border-radius: 8px; font-weight: 600; color: #6b7280; }
+    .tab.active { background: #1a1a2e; color: #e8d5b7; }
+    .section { display: none; }
+    .section.active { display: block; }
+    label { display: block; margin-top: 10px; font-weight: 500; font-size: 14px; }
+    input, select, textarea { width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #d1d5db; border-radius: 6px; box-sizing: border-box; }
+    textarea { height: 150px; resize: vertical; }
+    button { margin-top: 15px; padding: 10px 20px; background: #1a1a2e; color: #e8d5b7; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; width: 100%; }
+    button:hover { opacity: 0.9; }
+    table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 14px; }
+    th, td { border: 1px solid #e5e7eb; padding: 10px; text-align: left; }
+    th { background: #f9fafb; font-weight: 600; }
+    .btn-del { background: #ef4444; color: white; padding: 5px 10px; border-radius: 4px; border: none; cursor: pointer; }
+  </style>
+</head>
+<body>
+
+  <h1>LearnMate 後台管理系統</h1>
+
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('syllabus')">📖 學科課綱管理</div>
+    <div class="tab" onclick="switchTab('activities')">🏃 非學科範本管理</div>
+  </div>
+
+  <!-- 學科課綱管理 -->
+  <div id="syllabus" class="section active card">
+    <h2>新增/更新課綱</h2>
+    <label>學年度</label>
+    <input type="text" id="syl-year" placeholder="如: 114">
+    
+    <div style="display:flex; gap: 10px;">
+      <div style="flex:1">
+        <label>年級</label>
+        <select id="syl-grade">
+          <option value="1">一年級</option>
+          <option value="2">二年級</option>
+          <option value="3">三年級</option>
+          <option value="4">四年級</option>
+          <option value="5">五年級</option>
+          <option value="6" selected>六年級</option>
+        </select>
+      </div>
+      <div style="flex:1">
+        <label>科目</label>
+        <select id="syl-subject">
+          <option value="國語">國語</option>
+          <option value="數學" selected>數學</option>
+          <option value="英語">英語</option>
+          <option value="自然">自然</option>
+          <option value="社會">社會</option>
+        </select>
+      </div>
+      <div style="flex:1">
+        <label>版本</label>
+        <select id="syl-edition">
+          <option value="康軒版" selected>康軒版</option>
+          <option value="南一版">南一版</option>
+          <option value="翰林版">翰林版</option>
+        </select>
+      </div>
+    </div>
+
+    <label>課綱內容 (支援 Markdown)</label>
+    <textarea id="syl-content" placeholder="請貼上該學期的各單元教學目標、大綱或架構..."></textarea>
+    
+    <button onclick="saveSyllabus()">儲存課綱</button>
+
+    <h3 style="margin-top: 30px;">已登錄課綱列表</h3>
+    <table>
+      <thead><tr><th>學年度</th><th>年級</th><th>科目</th><th>版本</th><th>操作</th></tr></thead>
+      <tbody id="syl-list"></tbody>
+    </table>
+  </div>
+
+  <!-- 非學科範本管理 -->
+  <div id="activities" class="section card">
+    <h2>新增非學科範本 (家長派題清單)</h2>
+    
+    <label>分類</label>
+    <select id="act-category">
+      <option value="才藝">才藝</option>
+      <option value="運動">運動</option>
+      <option value="家事">家事</option>
+      <option value="閱讀">閱讀</option>
+    </select>
+
+    <label>任務名稱</label>
+    <input type="text" id="act-title" placeholder="如: 練鋼琴30分鐘">
+
+    <label>預設點數</label>
+    <input type="number" id="act-points" value="15">
+
+    <button onclick="saveActivity()">新增範本</button>
+
+    <h3 style="margin-top: 30px;">已建立範本列表</h3>
+    <table>
+      <thead><tr><th>分類</th><th>任務名稱</th><th>預設點數</th><th>操作</th></tr></thead>
+      <tbody id="act-list"></tbody>
+    </table>
+  </div>
+
+  <script>
+    const API_BASE = '/api/admin';
+
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+      event.target.classList.add('active');
+      document.getElementById(tabId).classList.add('active');
+    }
+
+    async function loadSyllabus() {
+      const res = await fetch(`${API_BASE}/syllabus`);
+      const data = await res.json();
+      const list = document.getElementById('syl-list');
+      list.innerHTML = data.data.map(item => `
+        <tr>
+          <td>${item.academicYear}</td>
+          <td>${item.grade}</td>
+          <td>${item.subject}</td>
+          <td>${item.edition}</td>
+          <td><button class="btn-del" onclick="deleteSyllabus('${item._id}')">刪除</button></td>
+        </tr>
+      `).join('');
+    }
+
+    async function saveSyllabus() {
+      const payload = {
+        academicYear: document.getElementById('syl-year').value,
+        grade: document.getElementById('syl-grade').value,
+        subject: document.getElementById('syl-subject').value,
+        edition: document.getElementById('syl-edition').value,
+        content: document.getElementById('syl-content').value
+      };
+      if (!payload.academicYear || !payload.content) return alert('請填寫完整資訊');
+      
+      await fetch(`${API_BASE}/syllabus`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      alert('儲存成功');
+      document.getElementById('syl-content').value = '';
+      loadSyllabus();
+    }
+
+    async function deleteSyllabus(id) {
+      if(!confirm('確定刪除？')) return;
+      await fetch(`${API_BASE}/syllabus/${id}`, { method: 'DELETE' });
+      loadSyllabus();
+    }
+
+    async function loadActivities() {
+      const res = await fetch(`${API_BASE}/activities`);
+      const data = await res.json();
+      const list = document.getElementById('act-list');
+      list.innerHTML = data.data.map(item => `
+        <tr>
+          <td>${item.category}</td>
+          <td>${item.title}</td>
+          <td>${item.defaultPoints}</td>
+          <td><button class="btn-del" onclick="deleteActivity('${item._id}')">刪除</button></td>
+        </tr>
+      `).join('');
+    }
+
+    async function saveActivity() {
+      const payload = {
+        category: document.getElementById('act-category').value,
+        title: document.getElementById('act-title').value,
+        defaultPoints: document.getElementById('act-points').value
+      };
+      if (!payload.title) return alert('請填寫名稱');
+      
+      await fetch(`${API_BASE}/activities`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      alert('儲存成功');
+      document.getElementById('act-title').value = '';
+      loadActivities();
+    }
+
+    async function deleteActivity(id) {
+      if(!confirm('確定刪除？')) return;
+      await fetch(`${API_BASE}/activities/${id}`, { method: 'DELETE' });
+      loadActivities();
+    }
+
+    // Init
+    loadSyllabus();
+    loadActivities();
+  </script>
+</body>
+</html>
