@@ -496,6 +496,17 @@ app.post('/api/tasks/skip', async (req, res) => {
   }
 });
 
+// 清除所有加強任務 (Demo專用)
+app.post('/api/tasks/clear-extra', async (req, res) => {
+  try {
+    const { familyId } = req.body;
+    await Task.deleteMany({ familyId, type: 'extra' });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // 15. 同步完整狀態
 app.get('/api/sync/:familyId', async (req, res) => {
   try {

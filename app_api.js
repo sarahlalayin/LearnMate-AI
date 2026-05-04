@@ -823,7 +823,9 @@ function renderStudentExtra(db) {
     return;
   }
   
-  list.innerHTML = db.extraTasks.map(t => `
+  const clearBtn = `<div style="text-align: right; margin-bottom: 8px;"><span onclick="clearExtraTasks()" style="font-size: 11px; color: #ef4444; cursor: pointer; padding: 4px;">🗑️ 清除所有派題</span></div>`;
+  
+  list.innerHTML = clearBtn + db.extraTasks.map(t => `
     <div class="p-card">
       <div style="display:flex;align-items:center;gap:10px">
         <div style="flex:1">
@@ -834,6 +836,18 @@ function renderStudentExtra(db) {
       </div>
     </div>
   `).join('');
+}
+
+async function clearExtraTasks() {
+  if(!confirm('確定要清除所有家長派題(加強練習)嗎？')) return;
+  try {
+    await fetch(`${API_BASE}/tasks/clear-extra`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ familyId: currentFamilyId })
+    });
+    alert('已清除所有加強練習！');
+    syncAndRender();
+  } catch(e) { alert('清除失敗'); }
 }
 
 // --- 測驗系統邏輯 ---
