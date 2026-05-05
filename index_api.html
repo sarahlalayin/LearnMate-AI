@@ -59,6 +59,7 @@
           <div class="p-topbar-sub" id="p-date-display">星期六 16:42 · 下午</div>
         </div>
         <div style="display:flex;gap:6px">
+          <div onclick="navTo('screen-parent-habits')" style="background:#2d4a3e;border-radius:20px;padding:4px 10px;cursor:pointer"><span style="font-size:11px;font-weight:500;color:#e8d5b7">🌟 習慣</span></div>
           <div style="background:#1a1a2e;border-radius:20px;padding:4px 10px;cursor:pointer"><span style="font-size:11px;font-weight:500;color:#e8d5b7" id="p-child-name">小明</span></div>
         </div>
       </div>
@@ -478,6 +479,44 @@
     </div>
 
   </div><!-- /app-container -->
+
+  <!-- 習慣設定畫面 (fullscreen modal) -->
+  <div id="screen-parent-habits" class="screen p-screen" style="background:#f5f5f0">
+    <div class="p-topbar">
+      <div onclick="navTo('screen-parent-home')" style="cursor:pointer;font-size:20px">←</div>
+      <div class="p-topbar-title" style="flex:1;text-align:center">非學科習慣設定</div>
+      <div style="width:20px"></div>
+    </div>
+    <div class="p-content" style="padding:12px">
+
+      <!-- 新增習慣表單 -->
+      <div class="p-card" style="margin-bottom:12px">
+        <div style="font-size:13px;font-weight:600;color:#0f0f14;margin-bottom:10px">➕ 新增習慣</div>
+        <div style="display:flex;gap:6px;margin-bottom:8px">
+          <input id="habit-icon" type="text" value="⭐" maxlength="2" style="width:44px;text-align:center;font-size:18px;border:1px solid #d1d5db;border-radius:6px;padding:6px" />
+          <input id="habit-name" type="text" placeholder="習慣名稱（如：練鋼琴）" style="flex:1;padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:12px" />
+        </div>
+        <div style="display:flex;gap:6px;margin-bottom:10px">
+          <select id="habit-category" style="flex:1;padding:6px;border:1px solid #d1d5db;border-radius:6px;font-size:12px">
+            <option value="才藝">🎵 才藝</option>
+            <option value="運動">🏃 運動</option>
+            <option value="家事">🏠 家事</option>
+            <option value="其他">⭐ 其他</option>
+          </select>
+          <input id="habit-points" type="number" value="10" min="1" max="100" placeholder="點數" style="width:70px;padding:6px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;text-align:center" />
+          <button onclick="addHabit()" class="p-btn p-btn-dark" style="font-size:12px;padding:6px 12px">新增</button>
+        </div>
+      </div>
+
+      <!-- 習慣清單 -->
+      <div class="p-card">
+        <div style="font-size:13px;font-weight:600;color:#0f0f14;margin-bottom:10px">我的習慣清單</div>
+        <div id="habits-list"><div style="text-align:center;padding:20px;color:#9ca3af;font-size:12px">尚未設定任何習慣</div></div>
+      </div>
+
+      <div style="font-size:11px;color:#9ca3af;margin-top:10px;text-align:center">💡 設定後可在「派題」下拉選單選擇習慣項目，直接派發給孩子打卡</div>
+    </div>
+  </div>
 
   <script src="app_api.js?v=5"></script>
 </body>

@@ -89,6 +89,7 @@ function updateScreenData(screenId) {
   else if (screenId === 'screen-parent-insights') renderParentInsights(db);
   else if (screenId === 'screen-parent-settings') renderParentSettings(db);
   else if (screenId === 'screen-parent-rewards') renderParentRewards(db);
+  else if (screenId === 'screen-parent-habits') renderHabitsScreen(db);
   else if (screenId === 'screen-student-home') renderStudentHome(db);
   else if (screenId === 'screen-student-choose') renderStudentChoose(db);
   else if (screenId === 'screen-student-rewards') renderStudentRewards(db);
@@ -433,6 +434,59 @@ function publishQuiz() {
   document.getElementById('published-box').style.display = 'block';
   setTimeout(() => document.getElementById('published-box').style.display = 'none', 3000);
   document.getElementById('topic-input').value = '';
+}
+
+// --- 習慣管理 ---
+function renderHabitsScreen(db) {
+  const list = document.getElementById('habits-list');
+  if (!list) return;
+  const activities = db.activities || [];
+  if (activities.length === 0) {
+    list.innerHTML = '<div style="text-align:center;padding:20px;color:#9ca3af;font-size:12px">尚未設定任何習慣</div>';
+    return;
+  }
+  const catIcon = { '才藝':'🎵', '運動':'🏃', '家事':'🏠', '其他':'⭐' };
+  list.innerHTML = activities.map(a => `
+    <div style="display:flex;align-items:center;gap:10px;background:#fff;border-radius:8px;padding:10px 12px;margin-bottom:6px;border:1px solid #e5e7eb">
+      <div style="font-size:22px">${a.icon || catIcon[a.category] || '⭐'}</div>
+      <div style="flex:1">
+        <div style="font-size:13px;font-weight:500;color:#0f0f14">${a.name}</div>
+        <div style="font-size:10px;color:#9ca3af">${catIcon[a.category] || ''} ${a.category} · ${a.points} 點</div>
+      </div>
+      <div onclick="deleteHabit('${a._id}')" style="color:#ef4444;font-size:18px;cursor:pointer;padding:0 4px">×</div>
+    </div>
+  `).join('');
+}
+
+async function addHabit() {
+  const name = document.getElementById('habit-name').value.trim();
+  const icon = document.getElementById('habit-icon').value.trim() || '⭐';
+  const category = document.getElementById('habit-category').value;
+  const points = parseInt(document.getElementById('habit-points').value) || 10;
+  if (!name) return alert('請輸入習慣名稱');
+  try {
+    const res = await fetch(`${API_BASE}/family/${currentFamilyId}/activities`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ name, icon, category, points })
+    });
+    const data = await res.json();
+    if (data.success) {
+      document.getElementById('habit-name').value = '';
+      document.getElementById('habit-icon').value = '⭐';
+      document.getElementById('habit-points').value = '10';
+      await syncAndRender();
+    } else { alert('新增失敗'); }
+  } catch(e) { alert('新增失敗'); }
+}
+
+async function deleteHabit(activityId) {
+  if (!confirm('確定要刪除這個習慣嗎？')) return;
+  try {
+    const res = await fetch(`${API_BASE}/family/${currentFamilyId}/activities/${activityId}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (data.success) { await syncAndRender(); }
+    else { alert('刪除失敗'); }
+  } catch(e) { alert('刪除失敗'); }
 }
 
 // --- 派題選單動態生成 ---

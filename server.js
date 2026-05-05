@@ -567,6 +567,41 @@ app.post('/api/tasks/clear-extra', async (req, res) => {
   }
 });
 
+// ★ 家長自訂非學科習慣 API
+app.get('/api/family/:familyId/activities', async (req, res) => {
+  try {
+    const family = await Family.findById(req.params.familyId).select('customActivities');
+    res.json({ success: true, activities: family?.customActivities || [] });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/family/:familyId/activities', async (req, res) => {
+  try {
+    const { name, category, icon, points } = req.body;
+    const family = await Family.findById(req.params.familyId);
+    if (!family) return res.status(404).json({ success: false, error: '找不到家庭' });
+    family.customActivities.push({ name, category: category || '其他', icon: icon || '⭐', points: points || 10 });
+    await family.save();
+    res.json({ success: true, activities: family.customActivities });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.delete('/api/family/:familyId/activities/:activityId', async (req, res) => {
+  try {
+    const family = await Family.findById(req.params.familyId);
+    if (!family) return res.status(404).json({ success: false, error: '找不到家庭' });
+    family.customActivities.pull({ _id: req.params.activityId });
+    await family.save();
+    res.json({ success: true, activities: family.customActivities });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // ==========================================
 // ★ 後台管理系統 API (Admin)
 // ==========================================
@@ -649,7 +684,6 @@ app.get('/api/sync/:familyId', async (req, res) => {
     const rewards = await Reward.find({ familyId });
     const alerts = await Alert.find({ familyId }).sort({ createdAt: -1 });
     const messages = await Message.find({ familyId }).sort({ createdAt: 1 });
-    const activities = await ActivityTemplate.find().sort({ category: 1 });
 
     res.json({
       success: true,
@@ -659,7 +693,7 @@ app.get('/api/sync/:familyId', async (req, res) => {
         profile: family.profile,
         points: family.points,
         streak: family.streak,
-        subjectAccuracy: Object.fromEntries(family.subjectAccuracy || new Map()), // ★ 真實正確率
+        subjectAccuracy: Object.fromEntries(family.subjectAccuracy || new Map()),
         tasks: tasks.filter(t => t.type === 'daily'),
         extraTasks: tasks.filter(t => t.type === 'extra'),
         rewards,
@@ -668,7 +702,7 @@ app.get('/api/sync/:familyId', async (req, res) => {
         ),
         alerts,
         messages: messages.map(m => m.text),
-        activities
+        activities: family.customActivities || []
       }
     });
   } catch (error) {
