@@ -11,6 +11,7 @@ const Alert = require('./models/Alert');
 const Message = require('./models/Message');
 const Syllabus = require('./models/Syllabus');
 const ActivityTemplate = require('./models/ActivityTemplate');
+const Question = require('./models/Question');
 
 const app = express();
 app.use(cors());
@@ -31,7 +32,18 @@ app.get('/', (req, res) => {
 
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/learnmate';
 mongoose.connect(MONGODB_URI)
-  .then(() => console.log('✅ MongoDB 資料庫連線成功'))
+  .then(async () => {
+    console.log('✅ MongoDB 資料庫連線成功');
+    // 自動初始化題庫
+    const count = await Question.countDocuments();
+    if (count === 0) {
+      const { SEED_QUESTIONS } = require('./questionSeed');
+      await Question.insertMany(SEED_QUESTIONS);
+      console.log(`📚 題庫已初始化：共 ${SEED_QUESTIONS.length} 題`);
+    } else {
+      console.log(`📚 題庫已有 ${count} 題`);
+    }
+  })
   .catch(err => console.error('❌ MongoDB 連線失敗:', err));
 
 // ── 通用 Gemini REST 呼叫函式 ──────────────────────────────
@@ -219,36 +231,39 @@ app.get('/api/tasks/:familyId', async (req, res) => {
   }
 });
 
-// 3. AI 考題生成 ★ 核心功能
+// 3. AI 考題生成 ★ 核心功能（優先從題庫抽題）
 app.post('/api/tasks/generate', async (req, res) => {
   try {
     const { subject, topic, grade, edition, familyId, count = 5 } = req.body;
-    // 查詢該年級科目的課綱
-    const syllabus = await Syllabus.findOne({ grade: grade || '5', subject, edition: edition || '通用版' });
-    const prompt = buildQuizPrompt(subject, topic, grade || '5', edition || '通用版', count, syllabus?.content);
+
+    // Step 1: 先從題庫 DB 隨機抽題
+    const dbQuestions = await Question.find({ subject, grade: grade || '6' });
+    console.log(`📚 [題庫] ${subject} 找到 ${dbQuestions.length} 題`);
 
     let questions = null;
-    const rawText = await callGemini(prompt);
-    if (rawText) {
-      try { questions = JSON.parse(rawText); } catch (e) { questions = null; }
-    }
+    let fromDB = false;
 
-    // Fallback mock questions
-    if (!questions || !Array.isArray(questions) || questions.length === 0) {
-      if (subject === '數學' && (edition === '康軒版' || edition === '康軒') && grade === '6') {
-        questions = [
-          { q: "計算 10 + 6 x 2 的值是多少？", opts: ["32", "28", "20", "22"], a: 3, exp: "四則混合運算要先乘除後加減。" },
-          { q: "小明每分鐘走 71 公尺，走了 5 分鐘，共走幾公尺？", opts: ["284", "360", "355", "76"], a: 2, exp: "距離 = 速率 x 時間。" },
-          { q: "一個長方體長 11 公分、寬 5 公分、高 9 公分，體積是多少立方公分？", opts: ["500", "495", "64", "486"], a: 1, exp: "長方體體積 = 長 x 寬 x 高。" },
-          { q: "以 330 為基準量，若比較量是基準量的 40%，比較量是多少？", opts: ["132", "370", "290", "152"], a: 0, exp: "比較量 = 基準量 x 百分率。" },
-          { q: "有 7 件上衣和 4 件褲子，每次各選一件，共有幾種搭配方式？", opts: ["11", "35", "27", "28"], a: 3, exp: "搭配問題可用乘法原理。" }
-        ];
-      } else {
+    if (dbQuestions.length >= count) {
+      const shuffled = [...dbQuestions].sort(() => Math.random() - 0.5);
+      questions = shuffled.slice(0, count).map(q => ({ q: q.q, opts: q.opts, a: q.a, exp: q.exp }));
+      fromDB = true;
+      console.log(`✅ [題庫] 從 DB 隨機抽取 ${count} 題`);
+    } else {
+      // Step 2: 題庫不足，嘗試 Gemini AI
+      console.log(`⚠️ [題庫] 題目不足，改用 AI 生成`);
+      const syllabus = await Syllabus.findOne({ grade: grade || '6', subject, edition: edition || '通用版' });
+      const prompt = buildQuizPrompt(subject, topic, grade || '6', edition || '通用版', count, syllabus?.content);
+      const rawText = await callGemini(prompt);
+      if (rawText) {
+        try { questions = JSON.parse(rawText); } catch (e) { questions = null; }
+      }
+
+      // Step 3: 最終 Fallback
+      if (!questions || !Array.isArray(questions) || questions.length === 0) {
         questions = Array.from({ length: count }, (_, i) => ({
-          q: `【${subject}】關於「${topic}」的第 ${i + 1} 題`,
+          q: `【${subject}】第 ${i + 1} 題（請至後台新增題庫）`,
           opts: ['選項 A', '選項 B', '選項 C', '選項 D'],
-          a: 0,
-          exp: `正確答案是選項 A。（離線示範題）`
+          a: 0, exp: '請管理員至後台補充題庫。'
         }));
       }
     }
@@ -257,11 +272,11 @@ app.post('/api/tasks/generate', async (req, res) => {
       familyId, type: 'extra', subject, topic,
       totalQuestions: questions.length,
       questions,
-      aiGenerated: !!rawText,
-      promptParams: { grade: grade || '5', edition: edition || '通用版' }
+      aiGenerated: !fromDB,
+      promptParams: { grade: grade || '6', edition: edition || '通用版' }
     });
 
-    res.json({ success: true, task: newTask, aiGenerated: !!rawText });
+    res.json({ success: true, task: newTask, fromDB, aiGenerated: !fromDB });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
