@@ -47,6 +47,13 @@ const familySchema = new mongoose.Schema({
       keyword: String         // 原始搜尋關鍵字
     }]
   }
+  // ★ 家長自訂非學科習慣（才藝/運動/家事）
+  customActivities: [{
+    name:     { type: String, required: true },
+    category: { type: String, enum: ['才藝','運動','家事','其他'], default: '其他' },
+    icon:     { type: String, default: '⭐' },
+    points:   { type: Number, default: 10 }
+  }]
 }, { timestamps: true });
 
 module.exports = mongoose.model('Family', familySchema);
