@@ -37,23 +37,40 @@ mongoose.connect(MONGODB_URI)
 // ── 通用 Gemini REST 呼叫函式 ──────────────────────────────
 async function callGemini(prompt, apiKey) {
   const key = apiKey || process.env.GEMINI_API_KEY;
-  if (!key) return null;
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`;
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-  });
-  const data = await resp.json();
-  let text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  // 強化 JSON 擷取，防止 Gemini 回覆夾雜其他說明文字導致 Parse 失敗
-  const match = text.match(/\[[\s\S]*\]|\{[\s\S]*\}/);
-  if (match) {
-    text = match[0];
-  } else {
-    text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+  if (!key) {
+    console.warn('⚠️ [Gemini] GEMINI_API_KEY 未設定，跳過 AI 生成');
+    return null;
   }
-  return text;
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`;
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+    });
+    const data = await resp.json();
+
+    // 診斷：記錄 API 回應狀態
+    if (!resp.ok) {
+      console.error(`❌ [Gemini] HTTP ${resp.status}:`, JSON.stringify(data).slice(0, 300));
+      return null;
+    }
+
+    let text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    console.log(`✅ [Gemini] 回應長度: ${text.length} 字元，前100字: ${text.slice(0, 100)}`);
+
+    // 強化 JSON 擷取
+    const match = text.match(/\[[\s\S]*\]|\{[\s\S]*\}/);
+    if (match) {
+      text = match[0];
+    } else {
+      text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+    }
+    return text || null;
+  } catch(e) {
+    console.error('❌ [Gemini] 呼叫失敗:', e.message);
+    return null;
+  }
 }
 
 // ── YouTube Data API v3 工具函式 ──────────────────────────
