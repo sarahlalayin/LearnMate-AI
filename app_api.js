@@ -33,11 +33,12 @@ const defaultDB = {
     { id: 3, type: 'positive', title: '數學 — 本週進步了！', desc: '可以讓他知道你注意到了。' }
   ],
   extraTasks: [], // 家長派的加強題
+  activities: [], // ★ 非學科活動範本 (才藝/運動/家事)
   rewards: [
     { id: 1, name: '週末電動 30分', cost: 100, icon: '🎮', proposedBy: 'parent', status: 'ready' },
     { id: 2, name: '壽司聚餐', cost: 500, icon: '🍣', proposedBy: 'parent', status: 'ready' },
     { id: 3, name: '自選書籍', cost: 300, icon: '📚', proposedBy: 'parent', status: 'ready' },
-    { id: 4, name: '去看電影', cost: 0, icon: '🎬', proposedBy: 'student', status: 'proposed' } // student proposed, pending parent setting
+    { id: 4, name: '去看電影', cost: 0, icon: '🎬', proposedBy: 'student', status: 'proposed' }
   ],
   rewardRequests: [] // { id, rewardId, date, status: 'pending'|'approved' }
 };

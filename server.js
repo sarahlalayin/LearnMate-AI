@@ -644,10 +644,20 @@ app.get('/api/sync/:familyId', async (req, res) => {
   }
 });
 
+// admin.html 專用路由（必須在 catch-all 之前）
+app.get('/admin', (req, res) => {
+  res.sendFile(path.join(STATIC_DIR, 'admin.html'));
+});
+
 // 其他 GET 路由回到首頁（避免重新整理出現 404）
 app.get('*', (req, res) => {
   if (!req.path.startsWith('/api')) {
-    res.sendFile(path.join(STATIC_DIR, 'index_api.html'));
+    // 若路徑是 admin.html 直接提供，否則回首頁
+    if (req.path === '/admin.html') {
+      res.sendFile(path.join(STATIC_DIR, 'admin.html'));
+    } else {
+      res.sendFile(path.join(STATIC_DIR, 'index_api.html'));
+    }
   }
 });
 
