@@ -5,8 +5,10 @@ const taskSchema = new mongoose.Schema({
   type: { type: String, enum: ['daily', 'extra'], required: true },
   subject: { type: String, required: true },
   topic: { type: String, required: true },
-  status: { type: String, enum: ['pending', 'completed', 'skipped'], default: 'pending' },
+  status: { type: String, enum: ['pending', 'submitted', 'completed', 'skipped'], default: 'pending' },
   points: { type: Number, default: 10 },
+  earnedPoints: { type: Number, default: 0 }, // ★ 學生答題累積的分數（送審時存入）
+  isActivity: { type: Boolean, default: false }, // ★ 是否為非學科習慣打卡
   totalQuestions: { type: Number, default: 5 },
   questions: [{
     q: String,
