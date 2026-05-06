@@ -46,7 +46,7 @@ const familySchema = new mongoose.Schema({
       desc: String,           // Gemini 生成的推薦理由
       keyword: String         // 原始搜尋關鍵字
     }]
-  }
+  },
   // ★ 家長自訂非學科習慣（才藝/運動/家事）
   customActivities: [{
     name:     { type: String, required: true },
