@@ -287,15 +287,67 @@ app.post('/api/tasks/create-activity', async (req, res) => {
   try {
     const { familyId, subject, topic } = req.body;
     const newTask = await Task.create({
-      familyId, 
-      type: 'extra', 
-      subject, 
-      topic,
-      totalQuestions: 0,
-      questions: [],
-      aiGenerated: false
+      familyId, type: 'extra', subject, topic,
+      totalQuestions: 0, questions: [],
+      isActivity: true, aiGenerated: false
     });
     res.json({ success: true, task: newTask });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ★ 學生送審（pending → submitted）
+app.post('/api/tasks/submit', async (req, res) => {
+  try {
+    const { taskId, earnedPoints, correctCount, totalCount, subject } = req.body;
+    const task = await Task.findByIdAndUpdate(
+      taskId,
+      { status: 'submitted', earnedPoints: earnedPoints || 0 },
+      { new: true }
+    );
+    res.json({ success: true, task });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ★ 家長確認完成（submitted → completed，給積分）
+app.post('/api/tasks/approve-extra', async (req, res) => {
+  try {
+    const { familyId, taskId, message } = req.body;
+    const task = await Task.findByIdAndUpdate(taskId, { status: 'completed' }, { new: true });
+    const family = await Family.findById(familyId);
+    const pts = task.earnedPoints || 15;
+    family.points += pts;
+    // streak 自動更新
+    const todayTW = new Date(Date.now() + 8 * 3600000).toISOString().split('T')[0];
+    if (family.lastActiveDate !== todayTW) {
+      const yesterday = new Date(Date.now() + 8 * 3600000 - 86400000).toISOString().split('T')[0];
+      family.streak = (family.lastActiveDate === yesterday) ? (family.streak || 0) + 1 : 1;
+      family.lastActiveDate = todayTW;
+    }
+    await family.save();
+    if (message) await Message.create({ familyId, text: message, from: 'parent' });
+    await Alert.create({ familyId, type: 'positive',
+      title: `✅ 確認完成：${task.subject}`,
+      desc: `「${task.topic}」已確認完成，給予 ${pts} 點！` });
+    res.json({ success: true, points: family.points });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ★ 家長退回重做（submitted → pending）
+app.post('/api/tasks/reject-extra', async (req, res) => {
+  try {
+    const { familyId, taskId, message } = req.body;
+    await Task.findByIdAndUpdate(taskId, { status: 'pending', earnedPoints: 0 });
+    if (message) await Message.create({ familyId, text: message, from: 'parent' });
+    await Alert.create({ familyId, type: 'warning',
+      title: '任務退回重做',
+      desc: `家長已退回「${message || '請再努力完成任務！'}」` });
+    res.json({ success: true });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -695,7 +747,8 @@ app.get('/api/sync/:familyId', async (req, res) => {
         streak: family.streak,
         subjectAccuracy: Object.fromEntries(family.subjectAccuracy || new Map()),
         tasks: tasks.filter(t => t.type === 'daily'),
-        extraTasks: tasks.filter(t => t.type === 'extra'),
+        extraTasks: tasks.filter(t => t.type === 'extra' && t.status !== 'completed'),
+        submittedCount: tasks.filter(t => t.type === 'extra' && t.status === 'submitted').length,
         rewards,
         rewardRequests: rewards.flatMap(r =>
           r.requests.map(req => ({ ...req.toObject(), rewardId: r._id, _id: req._id.toString() }))

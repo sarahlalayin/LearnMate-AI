@@ -202,6 +202,30 @@ function renderParentHome(db) {
       </div>`;
   }
 
+  // ★ 待確認任務取得
+  const submittedTasks = (db.extraTasks || []).filter(t => t.status === 'submitted');
+  const reviewPanel = document.getElementById('p-review-panel');
+  if (reviewPanel) {
+    if (submittedTasks.length > 0) {
+      reviewPanel.style.display = 'block';
+      reviewPanel.innerHTML = `
+        <div style="font-size:13px;font-weight:600;color:#0f0f14;margin-bottom:8px">⏳ 待確認項目（${submittedTasks.length}）</div>
+        ${submittedTasks.map(t => `
+          <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:10px;margin-bottom:6px">
+            <div style="font-size:13px;font-weight:500;margin-bottom:6px">${t.isActivity ? '🏅' : '📝'} ${t.subject} · ${t.topic}</div>
+            <div style="font-size:10px;color:#9ca3af;margin-bottom:8px">${t.isActivity ? '習慣打卡' : `答題完成 · 預計積分 ${t.earnedPoints || 15} 點`}</div>
+            <div style="display:flex;gap:6px">
+              <button onclick="approveExtra('${t._id}')" class="p-btn p-btn-green" style="flex:1;font-size:11px;padding:6px">✅ 確認完成</button>
+              <button onclick="rejectExtra('${t._id}')" class="p-btn p-btn-ghost" style="flex:1;font-size:11px;padding:6px">↩ 退回重做</button>
+            </div>
+          </div>
+        `).join('')}
+      `;
+    } else {
+      reviewPanel.style.display = 'none';
+    }
+  }
+
   // 預警預覽
   const preview = document.getElementById('p-alerts-preview');
   preview.innerHTML = db.alerts.slice(0,2).map(a => {
@@ -912,24 +936,38 @@ async function proposeReward() {
 
 function renderStudentExtra(db) {
   const list = document.getElementById('s-extra-list');
-  if(db.extraTasks.length === 0) {
+  const allExtra = db.extraTasks || [];
+  if (allExtra.length === 0) {
     list.innerHTML = '<div style="text-align:center;padding:20px;color:#9ca3af;font-size:12px;">目前沒有加強練習。</div>';
     return;
   }
-  
-  const clearBtn = `<div style="text-align: right; margin-bottom: 8px;"><span onclick="clearExtraTasks()" style="font-size: 11px; color: #ef4444; cursor: pointer; padding: 4px;">🗑️ 清除所有派題</span></div>`;
-  
-  list.innerHTML = clearBtn + db.extraTasks.map(t => `
-    <div class="p-card">
-      <div style="display:flex;align-items:center;gap:10px">
-        <div style="flex:1">
-          <div style="font-size:13px;font-weight:500;color:#0f0f14;margin-bottom:5px">${t.subject} · ${t.topic}</div>
-          <div style="font-size:10px;color:#9ca3af">${t.questions.length} 題 · +15點</div>
+
+  const clearBtn = `<div style="text-align:right;margin-bottom:8px"><span onclick="clearExtraTasks()" style="font-size:11px;color:#ef4444;cursor:pointer;padding:4px">🗑️ 清除所有派題</span></div>`;
+
+  list.innerHTML = clearBtn + allExtra.map(t => {
+    if (t.status === 'submitted') {
+      return `
+        <div class="p-card" style="opacity:0.8;border:1px solid #e5e7eb">
+          <div style="display:flex;align-items:center;gap:10px">
+            <div style="flex:1">
+              <div style="font-size:13px;font-weight:500;color:#0f0f14;margin-bottom:4px">${t.subject} · ${t.topic}</div>
+              <div style="font-size:10px;color:#9ca3af">${t.isActivity ? '習慣打卡' : `答題完成 · 預計 ${t.earnedPoints || 15} 點`}</div>
+            </div>
+            <div style="background:#FEF9C3;border:1px solid #ECC94B;border-radius:20px;padding:4px 10px;font-size:10px;font-weight:500;color:#92600a;white-space:nowrap">⏳ 等待確認</div>
+          </div>
+        </div>`;
+    }
+    return `
+      <div class="p-card">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="flex:1">
+            <div style="font-size:13px;font-weight:500;color:#0f0f14;margin-bottom:5px">${t.subject} · ${t.topic}</div>
+            <div style="font-size:10px;color:#9ca3af">${t.questions?.length || 0} 題 · 完成後由家長確認給分</div>
+          </div>
+          <div onclick="startExtraQuiz('${t._id || t.id}')" class="p-btn p-btn-green" style="font-size:12px;padding:8px 14px;flex-shrink:0">開始練習</div>
         </div>
-        <div onclick="startExtraQuiz('${t._id || t.id}')" class="p-btn p-btn-green" style="font-size:12px;padding:8px 14px;flex-shrink:0">開始練習</div>
-      </div>
-    </div>
-  `).join('');
+      </div>`;
+  }).join('');
 }
 
 async function clearExtraTasks() {
@@ -1041,17 +1079,13 @@ function startExtraQuiz(extraId) {
 async function finishActivity() {
   document.getElementById('opts').innerHTML = `<div style="text-align:center;padding:20px;color:#9ca3af;">處理中...</div>`;
   try {
-    await fetch(`${API_BASE}/tasks/complete`, {
+    await fetch(`${API_BASE}/tasks/submit`, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        familyId: currentFamilyId,
-        taskId: activeQuiz.id,
-        pointsToAdd: 15
-      })
+      body: JSON.stringify({ taskId: activeQuiz.id, earnedPoints: 15 })
     });
-    alert(`太棒了！任務打卡成功，獲得 15 點！`);
+    alert('打卡成功！等待家長確認完成後即可獲得 15 點。');
     await syncAndRender();
-    navTo('screen-student-home');
+    navTo('screen-student-extra');
   } catch(e) { alert('操作失敗'); }
 }
 
@@ -1123,25 +1157,59 @@ function nextQ() {
 async function finishQuiz() {
   const basePoints = activeQuiz.type === 'daily' ? 10 : 15;
   const earned = (activeQuiz.earnedPoints || 0) + basePoints;
-  // ★ 計算答對題數（每 +2點 = 答對 1 題）
   const correctCount = Math.round((activeQuiz.earnedPoints || 0) / 2);
   const totalCount = activeQuiz.questions.length;
   const subject = document.getElementById('s-quiz-subject').textContent.replace(' (加強)', '');
+
+  // 日常任務：直接完成給分
+  if (activeQuiz.type === 'daily') {
+    try {
+      await fetch(`${API_BASE}/tasks/complete`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ familyId: currentFamilyId, taskId: activeQuiz.id,
+          pointsToAdd: earned, correctCount, totalCount, subject })
+      });
+      alert(`測驗完成！答對 ${correctCount}/${totalCount} 題，獲得 ${earned} 點！`);
+      await syncAndRender();
+      navTo('screen-student-home');
+    } catch(e) { alert('操作失敗'); }
+  } else {
+    // 加強題：送審等家長確認
+    try {
+      await fetch(`${API_BASE}/tasks/submit`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ taskId: activeQuiz.id, earnedPoints: earned, correctCount, totalCount, subject })
+      });
+      alert(`測驗完成！答對 ${correctCount}/${totalCount} 題，等待家長確認後獲得 ${earned} 點。`);
+      await syncAndRender();
+      navTo('screen-student-extra');
+    } catch(e) { alert('操作失敗'); }
+  }
+}
+
+async function approveExtra(taskId) {
+  const msg = prompt('確認完成！要順便給孩子留言鼓勵嗎？(可留空不填)', '');
+  if (msg === null) return; // 按取消
   try {
-    await fetch(`${API_BASE}/tasks/complete`, {
+    await fetch(`${API_BASE}/tasks/approve-extra`, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        familyId: currentFamilyId,
-        taskId: activeQuiz.id,
-        pointsToAdd: earned,
-        correctCount,  // ★ 答對題數
-        totalCount,    // ★ 總題數
-        subject        // ★ 科目
-      })
+      body: JSON.stringify({ familyId: currentFamilyId, taskId, message: msg })
     });
-    alert(`測驗完成！答對 ${correctCount}/${totalCount} 題，獲得 ${earned} 點！`);
-    await syncAndRender();
-    navTo('screen-student-home');
+    alert('已確認！積分已發放給孩子。');
+    syncAndRender();
+  } catch(e) { alert('操作失敗'); }
+}
+
+async function rejectExtra(taskId) {
+  const msg = prompt('請告訴孩子為什麼需要重做？', '請再認真完成一次！');
+  if (msg === null) return;
+  try {
+    await fetch(`${API_BASE}/tasks/reject-extra`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ familyId: currentFamilyId, taskId, message: msg })
+    });
+    alert('已退回，孩子會收到通知。');
+    syncAndRender();
   } catch(e) { alert('操作失敗'); }
 }
 
