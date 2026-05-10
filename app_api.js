@@ -43,8 +43,7 @@ const defaultDB = {
   rewardRequests: [] // { id, rewardId, date, status: 'pending'|'approved' }
 };
 
-// ★ 使用相對路徑：前後端都在同一個 Render 服務上，/api 永遠指向正確的後端
-const API_BASE = '/api';
+const API_BASE = (window.location.protocol === 'file:' || (window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost') && window.location.port !== '5000') ? 'http://localhost:5000/api' : '/api';
 
 let globalDB = null;
 let currentFamilyId = null;
