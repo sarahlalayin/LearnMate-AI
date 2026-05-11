@@ -255,7 +255,29 @@
             <div><div style="font-size:10px;color:#888;margin-bottom:2px">自然</div><select id="set-ed-自然" style="width:100%;padding:6px;border-radius:4px;border:1px solid #d1d5db"><option>翰林版</option><option>康軒版</option><option>南一版</option></select></div>
             <div><div style="font-size:10px;color:#888;margin-bottom:2px">英語</div><select id="set-ed-英語" style="width:100%;padding:6px;border-radius:4px;border:1px solid #d1d5db"><option>康軒版</option><option>南一版</option><option>翰林版</option></select></div>
           </div>
-          <button onclick="saveSettings()" class="p-btn p-btn-dark p-btn-lg" style="margin-top:14px">儲存設定</button>
+          </div>
+          
+          <div style="height:1px;background:#e5e7eb;margin:16px 0"></div>
+          
+          <div style="font-size:13px;font-weight:500;margin-bottom:12px">習慣與活動建立</div>
+          <div style="font-size:11px;color:#4b5563;margin-bottom:8px">新增才藝、運動或家事等非學科任務，供學生打卡。</div>
+          <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
+            <input type="text" id="habit-icon" placeholder="圖示(如:🎵)" style="width:70px;padding:8px;border-radius:6px;border:1px solid #d1d5db;font-size:12px;text-align:center">
+            <input type="text" id="habit-name" placeholder="例如: 練鋼琴" style="flex:1;min-width:100px;padding:8px;border-radius:6px;border:1px solid #d1d5db;font-size:12px">
+            <select id="habit-category" style="width:75px;padding:8px;border-radius:6px;border:1px solid #d1d5db;font-size:12px">
+              <option value="才藝">才藝</option>
+              <option value="運動">運動</option>
+              <option value="家事">家事</option>
+              <option value="其他">其他</option>
+            </select>
+            <input type="number" id="habit-points" placeholder="點數" value="10" style="width:60px;padding:8px;border-radius:6px;border:1px solid #d1d5db;font-size:12px">
+            <button onclick="addHabit()" class="p-btn p-btn-dark" style="padding:8px 12px;width:100%">新增習慣</button>
+          </div>
+          <div id="habits-list" style="margin-bottom:16px">
+            <!-- 習慣列表將由 JS 渲染 -->
+          </div>
+
+          <button onclick="saveSettings()" class="p-btn p-btn-dark p-btn-lg" style="margin-top:14px;background:#2d4a3e;color:#a8d5b5">儲存學科設定</button>
         </div>
       </div>
       <div class="p-bottom-nav">

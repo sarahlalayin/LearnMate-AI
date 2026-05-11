@@ -114,7 +114,7 @@ function updateScreenData(screenId) {
   if (screenId === 'screen-parent-home') renderParentHome(db);
   else if (screenId === 'screen-parent-alerts') renderParentAlerts(db);
   else if (screenId === 'screen-parent-insights') renderParentInsights(db);
-  else if (screenId === 'screen-parent-settings') renderParentSettings(db);
+  else if (screenId === 'screen-parent-settings') { renderParentSettings(db); renderHabitsScreen(db); }
   else if (screenId === 'screen-parent-rewards') renderParentRewards(db);
   else if (screenId === 'screen-student-home') renderStudentHome(db);
   else if (screenId === 'screen-student-choose') renderStudentChoose(db);
@@ -472,6 +472,53 @@ function saveSettings() {
   });
   saveDB(db);
   alert('設定已儲存！');
+}
+
+// --- 習慣管理 (Mock) ---
+function renderHabitsScreen(db) {
+  const list = document.getElementById('habits-list');
+  if (!list) return;
+  const activities = db.activities || [];
+  if (activities.length === 0) {
+    list.innerHTML = '<div style="text-align:center;padding:20px;color:#9ca3af;font-size:12px">尚未設定任何習慣</div>';
+    return;
+  }
+  const catIcon = { '才藝':'🎵', '運動':'🏃', '家事':'🏠', '其他':'⭐' };
+  list.innerHTML = activities.map(a => `
+    <div style="display:flex;align-items:center;gap:10px;background:#fff;border-radius:8px;padding:10px 12px;margin-bottom:6px;border:1px solid #e5e7eb">
+      <div style="font-size:22px">${a.icon || catIcon[a.category] || '⭐'}</div>
+      <div style="flex:1">
+        <div style="font-size:13px;font-weight:500;color:#0f0f14">${a.name}</div>
+        <div style="font-size:10px;color:#9ca3af">${catIcon[a.category] || ''} ${a.category} · ${a.points} 點</div>
+      </div>
+      <div onclick="deleteHabit('${a.id}')" style="color:#ef4444;font-size:18px;cursor:pointer;padding:0 4px">×</div>
+    </div>
+  `).join('');
+}
+
+function addHabit() {
+  const name = document.getElementById('habit-name').value.trim();
+  const icon = document.getElementById('habit-icon').value.trim() || '⭐';
+  const category = document.getElementById('habit-category').value;
+  const points = parseInt(document.getElementById('habit-points').value) || 10;
+  if (!name) return alert('請輸入習慣名稱');
+  const db = getDB();
+  if(!db.activities) db.activities = [];
+  db.activities.push({ id: Date.now().toString(), name, icon, category, points });
+  saveDB(db);
+  document.getElementById('habit-name').value = '';
+  document.getElementById('habit-icon').value = '⭐';
+  document.getElementById('habit-points').value = '10';
+  updateScreenData(currentScreen);
+}
+
+function deleteHabit(activityId) {
+  if (!confirm('確定要刪除這個習慣嗎？')) return;
+  const db = getDB();
+  if(!db.activities) return;
+  db.activities = db.activities.filter(a => a.id !== activityId);
+  saveDB(db);
+  updateScreenData(currentScreen);
 }
 
 function renderParentRewards(db) {

@@ -86,7 +86,7 @@ function updateScreenData(screenId) {
   else if (screenId === 'screen-parent-alerts') renderParentAlerts(db);
   else if (screenId === 'screen-parent-msg') renderParentMsg(db);
   else if (screenId === 'screen-parent-insights') renderParentInsights(db);
-  else if (screenId === 'screen-parent-settings') renderParentSettings(db);
+  else if (screenId === 'screen-parent-settings') { renderParentSettings(db); renderHabitsScreen(db); }
   else if (screenId === 'screen-parent-rewards') renderParentRewards(db);
   else if (screenId === 'screen-parent-habits') renderHabitsScreen(db);
   else if (screenId === 'screen-student-home') renderStudentHome(db);
