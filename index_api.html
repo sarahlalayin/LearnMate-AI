@@ -24,27 +24,7 @@
       </div>
     </div>
 
-    <!-- Gemini AI Key 輸入區（可折疊） -->
-    <div style="width:100%; max-width: 320px; margin-bottom: 16px;">
-      <div onclick="toggleAIPanel()" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:8px 12px;background:rgba(168,213,181,0.08);border:1px solid rgba(168,213,181,0.2);border-radius:10px;margin-bottom:4px">
-        <div style="display:flex;align-items:center;gap:7px">
-          <span style="font-size:13px">✨</span>
-          <span style="font-size:11px;color:#a8d5b5;font-weight:500">AI 功能設定</span>
-          <span id="ai-status-badge" style="font-size:9px;padding:2px 6px;border-radius:6px;background:rgba(168,213,181,0.25);color:#a8d5b5">✨ AI 模式</span>
-        </div>
-        <span id="ai-panel-arrow" style="font-size:10px;color:#a8d5b5;transition:transform 0.2s">&#9660;</span>
-      </div>
-      <div id="ai-panel" style="display:none;background:rgba(255,255,255,0.04);border-radius:10px;padding:12px;border:1px solid rgba(168,213,181,0.15)">
-        <div style="font-size:10px;color:rgba(232,213,183,0.5);margin-bottom:8px;line-height:1.5">
-          輸入 Google Gemini API Key 即可啟用真實 AI 。無 Key 則使用 Mock 模式展示。
-        </div>
-        <input type="password" id="gemini-key-input" 
-          placeholder="AIzaSy... (可不填，使用 Mock 模式)"
-          style="width:100%;padding:8px;border-radius:7px;border:1px solid rgba(168,213,181,0.25);background:rgba(0,0,0,0.3);color:#e8d5b7;font-size:11px;box-sizing:border-box"
-          oninput="previewKeyStatus(this.value)">
-        <div id="ai-key-hint" style="font-size:10px;color:rgba(232,213,183,0.4);margin-top:6px">登入時自動儲存</div>
-      </div>
-    </div>
+    <!-- Gemini AI Key 輸入區已移除 -->
 
     <div onclick="loginAsParent()" style="background:#fff;border-radius:16px;padding:16px 20px;width:100%; max-width:320px; margin-bottom:10px;cursor:pointer;position:relative">
       <div style="font-size:22px;margin-bottom:6px">👩‍👦</div>
@@ -64,48 +44,13 @@
       </div>
     </div>
     
-    <div style="font-size:10px;color:rgba(232,213,183,0.2);margin-top:20px" id="version-label">Demo v2.0 · AI 加持</div>
+    <div style="font-size:10px;color:rgba(232,213,183,0.2);margin-top:20px" id="version-label">Demo v1.0 · API Mode</div>
   </div>
 
   <script>
-    // 登入頁 AI 面板控制
-    function toggleAIPanel() {
-      const panel = document.getElementById('ai-panel');
-      const arrow = document.getElementById('ai-panel-arrow');
-      const isOpen = panel.style.display !== 'none';
-      panel.style.display = isOpen ? 'none' : 'block';
-      arrow.style.transform = isOpen ? '' : 'rotate(180deg)';
-      if (!isOpen) {
-        // 面板開啟時自動充填已存的 key
-        const saved = localStorage.getItem('learnmate_gemini_key') || '';
-        const inp = document.getElementById('gemini-key-input');
-        if (saved && !inp.value) inp.value = saved;
-        previewKeyStatus(inp.value);
-      }
-    }
-    function previewKeyStatus(val) {
-      const badge = document.getElementById('ai-status-badge');
-      const hint = document.getElementById('ai-key-hint');
-      // DEFAULT_ACTIVE = 使用內建預設 Key
-      if (val === 'DEFAULT_ACTIVE' || (val && val.trim().length > 10)) {
-        badge.textContent = '✨ AI 模式';
-        badge.style.background = 'rgba(168,213,181,0.25)';
-        badge.style.color = '#a8d5b5';
-        hint.textContent = val === 'DEFAULT_ACTIVE' ? '使用內建 API Key (可自行替換)' : '登入時將自動儲存 API Key';
-      } else {
-        badge.textContent = 'Mock 模式';
-        badge.style.background = 'rgba(107,114,128,0.3)';
-        badge.style.color = '#9ca3af';
-        hint.textContent = '不填則使用內建示範資料';
-      }
-    }
-    // 頁面載入時检查已儲存的 key，或顯示預設 AI 模式狀態
+    // 預設 AI 模式狀態（後端處理）
     window.addEventListener('DOMContentLoaded', () => {
-      const saved = localStorage.getItem('learnmate_gemini_key') || '';
-      const inp = document.getElementById('gemini-key-input');
-      // 預設 key 已內建，所以預設就是 AI 模式
-      inp.value = saved; // 顯示使用者自訂的 key（若有）
-      previewKeyStatus(saved || 'DEFAULT_ACTIVE'); // 觸發 AI 模式顯示
+      // 可以在此加入其他初始化邏輯
     });
   </script>
 
@@ -153,13 +98,14 @@
         </div>
       </div>
       
-            <div class="p-bottom-nav">
-        <div class="p-nav-item active" onclick="navTo('screen-parent-home')"><div class="p-nav-icon">🏠</div><div class="p-nav-label">今日</div></div>
+      <div class="p-bottom-nav">
+        <div class="p-nav-item active" onclick="navTo('screen-parent-home')"><div class="p-nav-icon">🏠</div><div class="p-nav-label">快覽</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-alerts')"><div class="p-nav-icon">⚡</div><div class="p-nav-label">預警</div></div>
         <div class="p-nav-item" onclick="navTo('screen-parent-msg')"><div class="p-nav-icon">💬</div><div class="p-nav-label">派題</div></div>
-        <div class="p-nav-item" onclick="navTo('screen-parent-insights')"><div class="p-nav-icon">📊</div><div class="p-nav-label">報告</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-insights')"><div class="p-nav-icon">📊</div><div class="p-nav-label">洞察</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-rewards')"><div class="p-nav-icon">⭐</div><div class="p-nav-label">獎勵</div></div>
         <div class="p-nav-item" onclick="navTo('screen-parent-settings')"><div class="p-nav-icon">⚙️</div><div class="p-nav-label">設定</div></div>
         <div class="p-nav-item" onclick="logout()"><div class="p-nav-icon">🚪</div><div class="p-nav-label">登出</div></div>
-      </div>
       </div>
     </div>
 
@@ -169,13 +115,14 @@
       <div class="p-content" id="p-alerts-list">
         <!-- 動態載入預警 -->
       </div>
-            <div class="p-bottom-nav">
-        <div class="p-nav-item active" onclick="navTo('screen-parent-home')"><div class="p-nav-icon">🏠</div><div class="p-nav-label">今日</div></div>
+      <div class="p-bottom-nav">
+        <div class="p-nav-item" onclick="navTo('screen-parent-home')"><div class="p-nav-icon">🏠</div><div class="p-nav-label">快覽</div></div>
+        <div class="p-nav-item active" onclick="navTo('screen-parent-alerts')"><div class="p-nav-icon">⚡</div><div class="p-nav-label">預警</div></div>
         <div class="p-nav-item" onclick="navTo('screen-parent-msg')"><div class="p-nav-icon">💬</div><div class="p-nav-label">派題</div></div>
-        <div class="p-nav-item" onclick="navTo('screen-parent-insights')"><div class="p-nav-icon">📊</div><div class="p-nav-label">報告</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-insights')"><div class="p-nav-icon">📊</div><div class="p-nav-label">洞察</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-rewards')"><div class="p-nav-icon">⭐</div><div class="p-nav-label">獎勵</div></div>
         <div class="p-nav-item" onclick="navTo('screen-parent-settings')"><div class="p-nav-icon">⚙️</div><div class="p-nav-label">設定</div></div>
         <div class="p-nav-item" onclick="logout()"><div class="p-nav-icon">🚪</div><div class="p-nav-label">登出</div></div>
-      </div>
       </div>
     </div>
 
@@ -234,13 +181,14 @@
           <div id="published-box" style="display:none;background:#F0FFF4;border:0.5px solid #9AE6B4;border-radius:8px;padding:10px;margin-top:8px;font-size:12px;font-weight:500;color:#276749">✓ 已上架！</div>
         </div>
       </div>
-            <div class="p-bottom-nav">
-        <div class="p-nav-item" onclick="navTo('screen-parent-home')"><div class="p-nav-icon">🏠</div><div class="p-nav-label">今日</div></div>
+      <div class="p-bottom-nav">
+        <div class="p-nav-item" onclick="navTo('screen-parent-home')"><div class="p-nav-icon">🏠</div><div class="p-nav-label">快覽</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-alerts')"><div class="p-nav-icon">⚡</div><div class="p-nav-label">預警</div></div>
         <div class="p-nav-item active" onclick="navTo('screen-parent-msg')"><div class="p-nav-icon">💬</div><div class="p-nav-label">派題</div></div>
-        <div class="p-nav-item" onclick="navTo('screen-parent-insights')"><div class="p-nav-icon">📊</div><div class="p-nav-label">報告</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-insights')"><div class="p-nav-icon">📊</div><div class="p-nav-label">洞察</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-rewards')"><div class="p-nav-icon">⭐</div><div class="p-nav-label">獎勵</div></div>
         <div class="p-nav-item" onclick="navTo('screen-parent-settings')"><div class="p-nav-icon">⚙️</div><div class="p-nav-label">設定</div></div>
         <div class="p-nav-item" onclick="logout()"><div class="p-nav-icon">🚪</div><div class="p-nav-label">登出</div></div>
-      </div>
       </div>
     </div>
 
@@ -267,13 +215,14 @@
           </div>
         </div>
       </div>
-            <div class="p-bottom-nav">
-        <div class="p-nav-item" onclick="navTo('screen-parent-home')"><div class="p-nav-icon">🏠</div><div class="p-nav-label">今日</div></div>
+      <div class="p-bottom-nav">
+        <div class="p-nav-item" onclick="navTo('screen-parent-home')"><div class="p-nav-icon">🏠</div><div class="p-nav-label">快覽</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-alerts')"><div class="p-nav-icon">⚡</div><div class="p-nav-label">預警</div></div>
         <div class="p-nav-item" onclick="navTo('screen-parent-msg')"><div class="p-nav-icon">💬</div><div class="p-nav-label">派題</div></div>
-        <div class="p-nav-item active" onclick="navTo('screen-parent-insights')"><div class="p-nav-icon">📊</div><div class="p-nav-label">報告</div></div>
+        <div class="p-nav-item active" onclick="navTo('screen-parent-insights')"><div class="p-nav-icon">📊</div><div class="p-nav-label">洞察</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-rewards')"><div class="p-nav-icon">⭐</div><div class="p-nav-label">獎勵</div></div>
         <div class="p-nav-item" onclick="navTo('screen-parent-settings')"><div class="p-nav-icon">⚙️</div><div class="p-nav-label">設定</div></div>
         <div class="p-nav-item" onclick="logout()"><div class="p-nav-icon">🚪</div><div class="p-nav-label">登出</div></div>
-      </div>
       </div>
     </div>
 
@@ -283,13 +232,14 @@
       <div class="p-content" id="p-rewards-list">
         <!-- 動態生成獎勵 -->
       </div>
-            <div class="p-bottom-nav">
-        <div class="p-nav-item active" onclick="navTo('screen-parent-home')"><div class="p-nav-icon">🏠</div><div class="p-nav-label">今日</div></div>
+      <div class="p-bottom-nav">
+        <div class="p-nav-item" onclick="navTo('screen-parent-home')"><div class="p-nav-icon">🏠</div><div class="p-nav-label">快覽</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-alerts')"><div class="p-nav-icon">⚡</div><div class="p-nav-label">預警</div></div>
         <div class="p-nav-item" onclick="navTo('screen-parent-msg')"><div class="p-nav-icon">💬</div><div class="p-nav-label">派題</div></div>
-        <div class="p-nav-item" onclick="navTo('screen-parent-insights')"><div class="p-nav-icon">📊</div><div class="p-nav-label">報告</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-insights')"><div class="p-nav-icon">📊</div><div class="p-nav-label">洞察</div></div>
+        <div class="p-nav-item active" onclick="navTo('screen-parent-rewards')"><div class="p-nav-icon">⭐</div><div class="p-nav-label">獎勵</div></div>
         <div class="p-nav-item" onclick="navTo('screen-parent-settings')"><div class="p-nav-icon">⚙️</div><div class="p-nav-label">設定</div></div>
         <div class="p-nav-item" onclick="logout()"><div class="p-nav-icon">🚪</div><div class="p-nav-label">登出</div></div>
-      </div>
       </div>
     </div>
 
@@ -316,20 +266,16 @@
             <div><div style="font-size:10px;color:#888;margin-bottom:2px">英語</div><select id="set-ed-英語" style="width:100%;padding:6px;border-radius:4px;border:1px solid #d1d5db"><option>康軒版</option><option>南一版</option><option>翰林版</option></select></div>
           </div>
           <button onclick="saveSettings()" class="p-btn p-btn-dark p-btn-lg" style="margin-top:14px">儲存設定</button>
-          <div style="display:flex;gap:8px;margin-top:14px">
-            <button onclick="navTo('screen-parent-habits')" class="p-btn p-btn-ghost" style="flex:1;font-size:12px">🌟 習慣設定</button>
-            <button onclick="navTo('screen-parent-rewards')" class="p-btn p-btn-ghost" style="flex:1;font-size:12px">🎁 獎勵設定</button>
-          </div>
-
         </div>
       </div>
-            <div class="p-bottom-nav">
-        <div class="p-nav-item" onclick="navTo('screen-parent-home')"><div class="p-nav-icon">🏠</div><div class="p-nav-label">今日</div></div>
+      <div class="p-bottom-nav">
+        <div class="p-nav-item" onclick="navTo('screen-parent-home')"><div class="p-nav-icon">🏠</div><div class="p-nav-label">快覽</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-alerts')"><div class="p-nav-icon">⚡</div><div class="p-nav-label">預警</div></div>
         <div class="p-nav-item" onclick="navTo('screen-parent-msg')"><div class="p-nav-icon">💬</div><div class="p-nav-label">派題</div></div>
-        <div class="p-nav-item" onclick="navTo('screen-parent-insights')"><div class="p-nav-icon">📊</div><div class="p-nav-label">報告</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-insights')"><div class="p-nav-icon">📊</div><div class="p-nav-label">洞察</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-parent-rewards')"><div class="p-nav-icon">⭐</div><div class="p-nav-label">獎勵</div></div>
         <div class="p-nav-item active" onclick="navTo('screen-parent-settings')"><div class="p-nav-icon">⚙️</div><div class="p-nav-label">設定</div></div>
         <div class="p-nav-item" onclick="logout()"><div class="p-nav-icon">🚪</div><div class="p-nav-label">登出</div></div>
-      </div>
       </div>
     </div>
 
@@ -381,12 +327,13 @@
           <!-- 任務列表動態生成 -->
         </div>
       </div>
-            <div class="p-bottom-nav">
-        <div class="p-nav-item active" onclick="navTo('screen-student-home')"><div class="p-nav-icon">🏠</div><div class="p-nav-label">今日任務</div></div>
+      <div class="p-bottom-nav">
+        <div class="p-nav-item active" onclick="navTo('screen-student-home')"><div class="p-nav-icon">🏠</div><div class="p-nav-label">基地</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-student-choose')"><div class="p-nav-icon">📋</div><div class="p-nav-label">選順序</div></div>
         <div class="p-nav-item" onclick="navTo('screen-student-rewards')"><div class="p-nav-icon">⭐</div><div class="p-nav-label">我的獎勵</div></div>
-        <div class="p-nav-item" onclick="navTo('screen-student-profile')"><div class="p-nav-icon">👤</div><div class="p-nav-label">我的</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-student-extra')"><div class="p-nav-icon">💪</div><div class="p-nav-label">加強練習</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-student-videos')"><div class="p-nav-icon">📹</div><div class="p-nav-label">影片</div></div>
         <div class="p-nav-item" onclick="logout()"><div class="p-nav-icon">🚪</div><div class="p-nav-label">登出</div></div>
-      </div>
       </div>
     </div>
 
@@ -467,9 +414,9 @@
       </div>
     </div>
 
-    <!-- S5: 收藏庫 -->
+    <!-- S5: 我的獎勵 -->
     <div id="screen-student-rewards" class="screen s-screen">
-      <div class="p-topbar"><div class="p-topbar-title">我的收藏庫 ⭐</div></div>
+      <div class="p-topbar"><div class="p-topbar-title">我的獎勵 ⭐</div></div>
       <div class="p-content">
         <div style="font-size:11px;color:#9ca3af;margin-bottom:10px">點數是你努力的紀錄，跟爸媽一起決定換什麼</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:12px">
@@ -493,12 +440,13 @@
           <button onclick="proposeReward()" style="width:100%;background:transparent;border:1px solid #d1d5db;border-radius:20px;padding:8px;font-size:11px;font-weight:500;color:#4b5563;cursor:pointer">提議新獎勵 📝</button>
         </div>
       </div>
-            <div class="p-bottom-nav">
-        <div class="p-nav-item" onclick="navTo('screen-student-home')"><div class="p-nav-icon">🏠</div><div class="p-nav-label">今日任務</div></div>
+      <div class="p-bottom-nav">
+        <div class="p-nav-item" onclick="navTo('screen-student-home')"><div class="p-nav-icon">🏠</div><div class="p-nav-label">基地</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-student-choose')"><div class="p-nav-icon">📋</div><div class="p-nav-label">選順序</div></div>
         <div class="p-nav-item active" onclick="navTo('screen-student-rewards')"><div class="p-nav-icon">⭐</div><div class="p-nav-label">我的獎勵</div></div>
-        <div class="p-nav-item" onclick="navTo('screen-student-profile')"><div class="p-nav-icon">👤</div><div class="p-nav-label">我的</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-student-extra')"><div class="p-nav-icon">💪</div><div class="p-nav-label">加強練習</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-student-videos')"><div class="p-nav-icon">📹</div><div class="p-nav-label">影片</div></div>
         <div class="p-nav-item" onclick="logout()"><div class="p-nav-icon">🚪</div><div class="p-nav-label">登出</div></div>
-      </div>
       </div>
     </div>
 
@@ -514,12 +462,13 @@
           <!-- 加強題列表 -->
         </div>
       </div>
-            <div class="p-bottom-nav">
-        <div class="p-nav-item active" onclick="navTo('screen-student-home')"><div class="p-nav-icon">🏠</div><div class="p-nav-label">今日任務</div></div>
+      <div class="p-bottom-nav">
+        <div class="p-nav-item" onclick="navTo('screen-student-home')"><div class="p-nav-icon">🏠</div><div class="p-nav-label">基地</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-student-choose')"><div class="p-nav-icon">📋</div><div class="p-nav-label">選順序</div></div>
         <div class="p-nav-item" onclick="navTo('screen-student-rewards')"><div class="p-nav-icon">⭐</div><div class="p-nav-label">我的獎勵</div></div>
-        <div class="p-nav-item" onclick="navTo('screen-student-profile')"><div class="p-nav-icon">👤</div><div class="p-nav-label">我的</div></div>
+        <div class="p-nav-item active" onclick="navTo('screen-student-extra')"><div class="p-nav-icon">💪</div><div class="p-nav-label">加強練習</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-student-videos')"><div class="p-nav-icon">📹</div><div class="p-nav-label">影片</div></div>
         <div class="p-nav-item" onclick="logout()"><div class="p-nav-icon">🚪</div><div class="p-nav-label">登出</div></div>
-      </div>
       </div>
     </div>
 
@@ -540,17 +489,18 @@
         </div>
         <button onclick="refreshVideoRecommendations()" style="width:100%;margin-top:10px;background:transparent;border:1px dashed #d1d5db;border-radius:20px;padding:9px;font-size:11px;color:#6b7280;cursor:pointer">🔄 重新推薦</button>
       </div>
-            <div class="p-bottom-nav">
-        <div class="p-nav-item active" onclick="navTo('screen-student-home')"><div class="p-nav-icon">🏠</div><div class="p-nav-label">今日任務</div></div>
+      <div class="p-bottom-nav">
+        <div class="p-nav-item" onclick="navTo('screen-student-home')"><div class="p-nav-icon">🏠</div><div class="p-nav-label">基地</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-student-choose')"><div class="p-nav-icon">📋</div><div class="p-nav-label">選順序</div></div>
         <div class="p-nav-item" onclick="navTo('screen-student-rewards')"><div class="p-nav-icon">⭐</div><div class="p-nav-label">我的獎勵</div></div>
-        <div class="p-nav-item" onclick="navTo('screen-student-profile')"><div class="p-nav-icon">👤</div><div class="p-nav-label">我的</div></div>
+        <div class="p-nav-item" onclick="navTo('screen-student-extra')"><div class="p-nav-icon">💪</div><div class="p-nav-label">加強練習</div></div>
+        <div class="p-nav-item active" onclick="navTo('screen-student-videos')"><div class="p-nav-icon">📹</div><div class="p-nav-label">影片</div></div>
         <div class="p-nav-item" onclick="logout()"><div class="p-nav-icon">🚪</div><div class="p-nav-label">登出</div></div>
-      </div>
       </div>
     </div>
     
   </div>
 
-  <script src="app_api.js?v=6"></script>
+  <script src="app_api.js?v=8"></script>
 </body>
 </html>
