@@ -158,12 +158,9 @@ async function loginAsStudent() {
 }
 
 function logout() {
-  const current = document.getElementById(currentScreen);
-  if(current) current.classList.remove('active');
   currentUser = null;
   currentFamilyId = null;
   globalDB = null;
-  currentScreen = 'screen-login';
   navTo('screen-login');
 }
 
