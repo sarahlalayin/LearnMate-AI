@@ -18,10 +18,11 @@ app.use(cors());
 app.use(express.json());
 
 // ── 靜態檔案服務 ───────────────────────────────
-// Render 上：server.js 和 index_api.html 都在 repo 根目錄 (同一層)
-// process.cwd() 取得 Node 執行目錄（在 Render 上就是 repo 根目錄）
-// ★ index: 'index_api.html' 確保預設首頁是後端版，而非 index.html（本機版）
-const STATIC_DIR = process.cwd();
+// Render 上：server.js 在 backend/，index_api.html 在上一層 (repo 根目錄)
+// __dirname 取得 server.js 所在目錄，然後往上一層找前端靜態資源
+// ★ 修正 BUG-17：改用 path.join(__dirname, '..') 取代 process.cwd()
+//   確保本機與 Render 部署都能正確找到 index_api.html
+const STATIC_DIR = path.join(__dirname, '..');
 app.use(express.static(STATIC_DIR, { index: 'index_api.html' }));
 
 // 根路由 → 回傳 index_api.html
@@ -461,6 +462,41 @@ app.post('/api/rewards/propose', async (req, res) => {
     const newReward = await Reward.create({ familyId, name, icon, cost: 0, proposedBy: 'student', status: 'proposed' });
     await Alert.create({ familyId, type: 'positive', title: `✨ 新獎勵許願：${name}`, desc: `孩子提議將「${icon} ${name}」加入清單，快去設定點數吧！` });
     res.json({ success: true, reward: newReward });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 7b. 同意孩子提議的新獎勵（家長設定點數）★ BUG-08 修復
+app.post('/api/rewards/approve-proposal', async (req, res) => {
+  try {
+    const { familyId, rewardId, cost, message } = req.body;
+    const reward = await Reward.findByIdAndUpdate(
+      rewardId,
+      { status: 'ready', cost: parseInt(cost) || 0 },
+      { new: true }
+    );
+    if (!reward) return res.status(404).json({ success: false, error: '找不到獎勵' });
+    if (message) await Message.create({ familyId, text: message, from: 'parent' });
+    await Alert.create({ familyId, type: 'positive',
+      title: `✅ 爸媽同意了你的新獎勵：${reward.name}`,
+      desc: `「${reward.icon} ${reward.name}」已加入兌換清單，目標 ${cost} 點！繼續加油吧！` });
+    res.json({ success: true, reward });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 7c. 婉拒孩子提議的獎勵（家長）★ BUG-08 修復
+app.post('/api/rewards/reject-proposal', async (req, res) => {
+  try {
+    const { familyId, rewardId, message } = req.body;
+    await Reward.findByIdAndDelete(rewardId);
+    if (message) await Message.create({ familyId, text: message, from: 'parent' });
+    await Alert.create({ familyId, type: 'warning',
+      title: '爸媽婉拒了你的獎勵提議',
+      desc: message || '謝謝你的提議！我們一起想想別的獎勵吧。' });
+    res.json({ success: true });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }

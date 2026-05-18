@@ -20,7 +20,7 @@
     <div style="width:100%; max-width: 320px; background: rgba(255,255,255,0.05); border-radius: 16px; padding: 20px; margin-bottom: 20px;">
       <div style="margin-bottom: 12px;">
         <label style="color: #e8d5b7; font-size: 12px; margin-bottom: 4px; display: block;">家庭代碼 (Family Code)</label>
-        <input type="text" id="family-code-input" value="DEMO123" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid rgba(232,213,183,0.3); background: rgba(0,0,0,0.2); color: white;">
+        <input type="text" id="family-code-input" value="DEMO999" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid rgba(232,213,183,0.3); background: rgba(0,0,0,0.2); color: white;">
       </div>
     </div>
 
@@ -44,7 +44,7 @@
       </div>
     </div>
     
-    <div style="font-size:10px;color:rgba(232,213,183,0.2);margin-top:20px" id="version-label">Demo v1.0 · API Mode</div>
+    <div style="font-size:10px;color:rgba(232,213,183,0.2);margin-top:20px" id="version-label">Demo v2.0 · API Mode · AI Powered</div>
   </div>
 
   <script>
@@ -79,6 +79,11 @@
           <div class="stat-item"><div class="stat-val" id="p-stat-rate">82%</div><div class="stat-lbl">本週完成率</div></div>
           <div class="stat-item"><div class="stat-val" id="p-stat-accuracy">71%</div><div class="stat-lbl">各科正確率</div></div>
           <div class="stat-item"><div class="stat-val" id="p-stat-streak">🔥0</div><div class="stat-lbl">連勤天數</div></div>
+        </div>
+
+        <!-- 待確認任務面板 (BUG-06 修復：新增此元素) -->
+        <div id="p-review-panel" style="display:none;background:#fff;border-radius:12px;border:0.5px solid #e5e7eb;padding:12px 14px;margin-bottom:8px">
+          <!-- 動態產生待確認任務 -->
         </div>
 
         <div class="p-card">

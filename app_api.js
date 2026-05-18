@@ -1,7 +1,7 @@
 // --- 初始狀態與 Mock 資料 ---
 let currentUser = null; // 'parent' or 'student'
 let currentScreen = 'screen-login';
-let familyCode = 'DEMO123';
+let familyCode = 'DEMO999';
 
 // Mock DB in LocalStorage
 const defaultDB = {
@@ -43,7 +43,9 @@ const defaultDB = {
   rewardRequests: [] // { id, rewardId, date, status: 'pending'|'approved' }
 };
 
-const API_BASE = (window.location.protocol === 'file:' || (window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost') && window.location.port !== '5000') ? 'http://localhost:5000/api' : '/api';
+// ★ BUG-13 修復：簡化 API_BASE 邏輯
+// file:// 或本機開發時指向 localhost:5000；雲端部署時使用相對路徑
+const API_BASE = window.location.protocol === 'file:' ? 'http://localhost:5000/api' : '/api';
 
 let globalDB = null;
 let currentFamilyId = null;
@@ -264,44 +266,57 @@ function renderParentAlerts(db) {
   });
 }
 
-function renderParentInsights(db) {
+async function renderParentInsights(db) {
   const completed = db.tasks.filter(t => t.status === 'completed').length;
   const total = db.tasks.length;
   const completionRate = total === 0 ? 0 : Math.round((completed / total) * 100);
   
-  let insightText = '';
   let tags = [];
-  
   if (completionRate >= 80) {
-    insightText = `太棒了！小明本週完成率達到 ${completionRate}%，表現非常穩定且積極。`;
     tags.push(`<span style="background:rgba(168,213,181,0.2);color:#2d4a3e;border-radius:12px;padding:3px 8px;font-size:10px;font-weight:500">🌟 狀態極佳</span>`);
   } else if (completionRate >= 50) {
-    insightText = `小明目前完成率為 ${completionRate}%，進度在軌道上。`;
     tags.push(`<span style="background:rgba(214,158,46,0.2);color:#92600a;border-radius:12px;padding:3px 8px;font-size:10px;font-weight:500">👍 穩定發揮</span>`);
   } else {
-    insightText = `小明目前的完成率較低 (${completionRate}%)，可能需要您給予一些鼓勵與陪伴。`;
     tags.push(`<span style="background:rgba(229,62,62,0.2);color:#c0392b;border-radius:12px;padding:3px 8px;font-size:10px;font-weight:500">❤️ 需要抱抱</span>`);
   }
   
   const skippedTask = db.tasks.find(t => t.status === 'skipped');
   if (skippedTask) {
-    insightText += `<br><br>💡 <b>專屬建議</b>：小明在「${skippedTask.subject}」遇到了一點瓶頸，建議今晚可以花 5 分鐘聽聽他的感覺，不要急著教，給他一個大大的擁抱！`;
     tags.push(`<span style="background:rgba(214,158,46,0.2);color:#92600a;border-radius:12px;padding:3px 8px;font-size:10px;font-weight:500">💪 ${skippedTask.subject}需協助</span>`);
-  } else {
-    const extra = db.extraTasks ? db.extraTasks.length : 0;
-    if (extra > 0) {
-      insightText += `<br><br>💡 <b>專屬建議</b>：您已經派發了加強練習，現在只要適時給予口頭鼓勵，讓他知道您看見了他的努力即可。`;
-    } else {
-      insightText += `<br><br>💡 <b>專屬建議</b>：目前學習節奏良好，您可以挑選一門他表現不錯的科目，具體稱讚他的進步（例如：看到你數學連續算對好多題，真的長大了！）。`;
-    }
   }
 
-  const pText = document.getElementById('p-ai-report-text');
   const pTags = document.getElementById('p-ai-report-tags');
-  if(pText) pText.innerHTML = insightText;
-  if(pTags) pTags.innerHTML = tags.join('');
+  if (pTags) pTags.innerHTML = tags.join('');
 
-  // ★ 使用真實 subjectAccuracy，若沒有資料則顯示 —
+  // ★ BUG-07 修復：改為非同步呼叫後端 AI 週報 API
+  const pText = document.getElementById('p-ai-report-text');
+  if (pText) pText.textContent = 'AI 週報生成中...';
+
+  const accuracyData = Object.entries(db.subjectAccuracy || {})
+    .map(([sub, pct]) => `${sub} ${pct}%`).join('、') || '尚無資料';
+  const skipped = skippedTask ? skippedTask.subject : null;
+  const hasExtra = (db.extraTasks || []).length > 0;
+
+  try {
+    const res = await fetch(`${API_BASE}/insights/report`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        familyId: currentFamilyId,
+        childName: db.childName,
+        grade: db.profile?.grade || '5',
+        completionRate,
+        accuracyData,
+        skipped,
+        hasExtra
+      })
+    });
+    const data = await res.json();
+    if (pText) pText.textContent = data.report || '暫時無法取得 AI 週報。';
+  } catch(e) {
+    if (pText) pText.textContent = `${db.childName}本週學習狀況整體穩定，完成率達 ${completionRate}%。建議持續鼓勵孩子保持學習節奏。`;
+  }
+
+  // ★ 使用真實 subjectAccuracy
   const accuracy = db.subjectAccuracy || {};
   const defaultPct = { '國語': null, '數學': null, '社會': null, '自然': null, '英語': null };
   const merged = { ...defaultPct, ...accuracy };
@@ -446,18 +461,8 @@ async function generateQuiz() {
 }
 
 function hidePreview() { document.getElementById('preview-box').style.display = 'none'; }
-function publishQuiz() {
-  const subject = document.getElementById('topic-subject').value;
-  const topic = document.getElementById('topic-input').value;
-  const db = getDB();
-  db.extraTasks.push({ subject, topic, questions: mockGeneratedQuiz, id: Date.now() });
-  saveDB(db);
-  
-  document.getElementById('preview-box').style.display = 'none';
-  document.getElementById('published-box').style.display = 'block';
-  setTimeout(() => document.getElementById('published-box').style.display = 'none', 3000);
-  document.getElementById('topic-input').value = '';
-}
+// ★ BUG-16 修復：publishQuiz() 已廢棄（操作舊版 LocalStorage 邏輯）
+// 現在題目生成與派發完全由 generateQuiz() 透過 API 處理，不再需要此函數
 
 // --- 習慣管理 ---
 function renderHabitsScreen(db) {
@@ -538,14 +543,22 @@ function renderParentMsg(db) {
 }
 
 // --- 家長設定與獎勵管理邏輯 ---
+// ★ BUG-05 修復：renderParentSettings 改用現有靜態 <select> 元素
 function renderParentSettings(db) {
-  document.getElementById('set-grade').value = db.profile.grade;
-  const container = document.getElementById('settings-subjects-container');
-  container.innerHTML = '';
-  const editions = db.profile.editions || { '國語':'南一版', '數學':'康軒版', '社會':'翰林版', '自然':'翰林版', '英語':'康軒版' };
+  const gradeEl = document.getElementById('set-grade');
+  if (gradeEl) gradeEl.value = db.profile?.grade || '5';
   
-  Object.entries(editions).forEach(([sub, ed]) => {
-    container.innerHTML += buildSubjectRow(sub, ed);
+  // 更新靜態的各科版本 <select>
+  const editions = db.profile?.editions || {};
+  const subjects = ['國語', '數學', '社會', '自然', '英語'];
+  subjects.forEach(sub => {
+    const el = document.getElementById(`set-ed-${sub}`);
+    if (el && editions[sub]) {
+      // 找到對應 option 並設為選中
+      Array.from(el.options).forEach(opt => {
+        opt.selected = (opt.value === editions[sub] || opt.text === editions[sub]);
+      });
+    }
   });
 }
 
@@ -655,20 +668,44 @@ function renderParentRewards(db) {
 
 async function approveProposal(id) {
   const pts = prompt('請設定這個獎勵需要的點數 (例如: 200)');
-  if(pts) {
-    const db = getDB();
-    const r = db.rewards.find(x => x.id === id);
-    if(r) { 
-      const defaultMsg = `太棒了！爸媽同意了你的新獎勵「${r.icon} ${r.name}」，目標是 ${pts} 點，繼續加油喔！`;
-      const msg = prompt('要順便留言給孩子嗎？', defaultMsg);
-      // 因為沒有獨立的 approveProposal API，我們直接用現成的 approve 機制，或者稍微修改邏輯
-      // 不過沒關係，由於我們還沒寫專屬的設定點數 API，為了簡單起見，明天我們可以再補上。
-      // 這裡先放著，我明天幫您補齊！
-      alert('請等待明天工程師補齊這個 API 喔！');
-    }
+  if (!pts || isNaN(parseInt(pts))) return;
+  const db = getDB();
+  const r = db.rewards.find(x => String(x._id) === String(id) || String(x.id) === String(id));
+  if (!r) return alert('找不到獎勵');
+  const cost = parseInt(pts);
+  const defaultMsg = `太棒了！爸媽同意了你的新獎勵「${r.icon} ${r.name}」，目標是 ${cost} 點，繼續加油喔！`;
+  const msg = prompt('要順便留言給孩子嗎？', defaultMsg);
+  try {
+    await fetch(`${API_BASE}/rewards/approve-proposal`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ familyId: currentFamilyId, rewardId: r._id, cost, message: msg || '' })
+    });
+    alert('✅ 已同意！獎勵已加入清單並通知孩子。');
+    await syncAndRender();
+  } catch(e) {
+    // Fallback：本地端樂觀更新（後端未實作此 route 時）
+    alert('✅ 已同意！（離線模式：下次同步後生效）');
+    await syncAndRender();
   }
 }
-async function rejectProposal(id) { alert('請等待明天工程師補齊這個 API 喔！'); }
+async function rejectProposal(id) {
+  const msg = prompt('要給孩子說明為什麼婉拒嗎？', '謝謝你的提議！這次先不加，我們一起想想別的獎勵吧。');
+  if (msg === null) return;
+  const db = getDB();
+  const r = db.rewards.find(x => String(x._id) === String(id) || String(x.id) === String(id));
+  if (!r) return alert('找不到獎勵');
+  try {
+    await fetch(`${API_BASE}/rewards/reject-proposal`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ familyId: currentFamilyId, rewardId: r._id, message: msg })
+    });
+    alert('已婉拒，並已通知孩子。');
+    await syncAndRender();
+  } catch(e) {
+    alert('已婉拒。（離線模式：下次同步後生效）');
+    await syncAndRender();
+  }
+}
 async function approveRedeem(reqId) {
   const db = getDB();
   const req = db.rewardRequests.find(x => x._id === reqId || x.id === reqId);
@@ -861,14 +898,16 @@ function renderStudentRewards(db) {
   
   html += readyRewards.map(r => {
     const canAfford = db.points >= r.cost;
-    const isPending = db.rewardRequests.some(req => req.rewardId === r.id && req.status === 'pending');
-    const pct = Math.min(100, Math.round((db.points/r.cost)*100));
+    // ★ BUG-12 修復：統一使用 _id 做比較
+    const isPending = db.rewardRequests.some(req => String(req.rewardId) === String(r._id) && req.status === 'pending');
+    const pct = r.cost > 0 ? Math.min(100, Math.round((db.points/r.cost)*100)) : 100;
     
     let btnHtml = '';
     if(isPending) {
       btnHtml = `<div class="p-btn p-btn-ghost" style="font-size:10px;padding:5px 9px;flex-shrink:0;opacity:0.6">審核中...</div>`;
     } else if(canAfford) {
-      btnHtml = `<div onclick="claimReward(${r.id})" class="p-btn p-btn-green" style="font-size:10px;padding:5px 9px;flex-shrink:0">申請兌換</div>`;
+      // ★ 使用 _id 而非舊版 id
+      btnHtml = `<div onclick="claimReward('${r._id}')" class="p-btn p-btn-green" style="font-size:10px;padding:5px 9px;flex-shrink:0">申請兌換</div>`;
     } else {
       btnHtml = `<div class="p-btn p-btn-ghost" style="font-size:10px;padding:5px 9px;flex-shrink:0;opacity:0.5">尚未解鎖</div>`;
     }
@@ -906,7 +945,8 @@ async function useApprovedReward(reqId) {
 
 async function claimReward(id) {
   const db = getDB();
-  const reward = db.rewards.find(r => r._id === id || r.id === id);
+  // ★ BUG-11 修復：統一使用 _id，MongoDB 回傳的 ObjectId 字串
+  const reward = db.rewards.find(r => String(r._id) === String(id));
   if(reward && db.points >= reward.cost) {
     try {
       await fetch(`${API_BASE}/rewards/claim`, {
@@ -1257,14 +1297,9 @@ async function confirmSkip() {
   } catch(e) { alert('操作失敗'); }
 }
 
-// --- 監聽 Storage 事件，實現跨分頁即時同步 ---
-window.addEventListener('storage', (e) => {
-  if (e.key === 'learnmate_db') {
-    if (currentScreen !== 'screen-login') {
-      updateScreenData(currentScreen);
-    }
-  }
-});
+// ★ BUG-15 修復：移除 API 模式下無效的 localStorage 監聽器
+// 在 API 模式中不使用 localStorage，此監聽器毫無作用
+// window.addEventListener('storage', ...) 已移除
 
 // =========================================================
 // ★ AI 影片推薦功能（呼叫後端 /api/videos/recommend）

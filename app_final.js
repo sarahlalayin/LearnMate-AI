@@ -33,7 +33,7 @@ async function callGeminiAPI(prompt) {
 // --- 初始狀態與 Mock 資料 ---
 let currentUser = null; // 'parent' or 'student'
 let currentScreen = 'screen-login';
-let familyCode = 'DEMO123';
+let familyCode = 'DEMO999';
 
 // Mock DB in LocalStorage
 const defaultDB = {
@@ -65,6 +65,7 @@ const defaultDB = {
     { id: 3, type: 'positive', title: '數學 — 本週進步了！', desc: '可以讓他知道你注意到了。' }
   ],
   extraTasks: [], // 家長派的加強題
+  activities: [], // ★ 非學科活動範本 (才藝/運動/家事)
   rewards: [
     { id: 1, name: '週末電動 30分', cost: 100, icon: '🎮', proposedBy: 'parent', status: 'ready' },
     { id: 2, name: '壽司聚餐', cost: 500, icon: '🍣', proposedBy: 'parent', status: 'ready' },
