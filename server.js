@@ -3,6 +3,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
 
 const Family = require('./models/Family');
 const Task = require('./models/Task');
@@ -18,16 +19,33 @@ app.use(cors());
 app.use(express.json());
 
 // ── 靜態檔案服務 ───────────────────────────────
-// Render 上：server.js 在 backend/，index_api.html 在上一層 (repo 根目錄)
-// __dirname 取得 server.js 所在目錄，然後往上一層找前端靜態資源
-// ★ 修正 BUG-17：改用 path.join(__dirname, '..') 取代 process.cwd()
-//   確保本機與 Render 部署都能正確找到 index_api.html
-const STATIC_DIR = path.join(__dirname, '..');
-app.use(express.static(STATIC_DIR, { index: 'index_api.html' }));
+// 候選路徑：依序嘗試，找到含有 HTML 的目錄為主
+// Render 部署時 __dirname 通常為 /opt/render/project/backend
+const STATIC_CANDIDATES = [
+  path.join(__dirname, '..'),        // 標準：backend/../ → repo root
+  path.join(__dirname, '../..'),     // 備援：多一層向上
+  process.cwd(),                     // CWD（可能是 repo root）
+  path.join(process.cwd(), '..'),    // CWD 上一層
+];
 
-// 根路由 → 回傳 index_api.html
+// 優先找 index_api.html，其次 index.html
+let STATIC_DIR = path.join(__dirname, '..');
+let INDEX_FILE = 'index_api.html';
+
+for (const dir of STATIC_CANDIDATES) {
+  if (fs.existsSync(path.join(dir, 'index_api.html'))) {
+    STATIC_DIR = dir; INDEX_FILE = 'index_api.html'; break;
+  } else if (fs.existsSync(path.join(dir, 'index.html'))) {
+    STATIC_DIR = dir; INDEX_FILE = 'index.html';
+  }
+}
+console.log(`📂 靜態目錄：${STATIC_DIR}（主頁：${INDEX_FILE}）`);
+
+app.use(express.static(STATIC_DIR, { index: INDEX_FILE }));
+
+// 根路由 → 回傳主頁
 app.get('/', (req, res) => {
-  res.sendFile(path.join(STATIC_DIR, 'index_api.html'));
+  res.sendFile(path.join(STATIC_DIR, INDEX_FILE));
 });
 
 
@@ -801,18 +819,19 @@ app.get('/api/sync/:familyId', async (req, res) => {
 
 // admin.html 專用路由（必須在 catch-all 之前）
 app.get('/admin', (req, res) => {
-  res.sendFile(path.join(STATIC_DIR, 'admin.html'));
+  const adminPath = path.join(STATIC_DIR, 'admin.html');
+  if (fs.existsSync(adminPath)) res.sendFile(adminPath);
+  else res.status(404).send('Admin page not found');
 });
 
 // 其他 GET 路由回到首頁（避免重新整理出現 404）
 app.get('*', (req, res) => {
   if (!req.path.startsWith('/api')) {
-    // 若路徑是 admin.html 直接提供，否則回首頁
     if (req.path === '/admin.html') {
-      res.sendFile(path.join(STATIC_DIR, 'admin.html'));
-    } else {
-      res.sendFile(path.join(STATIC_DIR, 'index_api.html'));
+      const adminPath = path.join(STATIC_DIR, 'admin.html');
+      if (fs.existsSync(adminPath)) return res.sendFile(adminPath);
     }
+    res.sendFile(path.join(STATIC_DIR, INDEX_FILE));
   }
 });
 
