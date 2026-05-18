@@ -4,78 +4,61 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>LearnMate AI - 智慧自律學習平台</title>
-  <link rel="stylesheet" href="style.css?v=21">
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    html { height: 100%; }
-    body {
-      height: 100%; width: 100%; overflow: hidden; background: #000;
-      display: flex; justify-content: center; align-items: flex-start;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    }
-    #app-container {
-      position: relative;
-      width: 400px; max-width: 100vw;
-      height: 100vh; overflow: hidden;
-      background: #f5f5f0; flex-shrink: 0;
-    }
-    .screen {
-      position: absolute;
-      top: 0; left: 0; right: 0; bottom: 0;
-      display: flex; flex-direction: column;
-      opacity: 0; pointer-events: none;
-      transition: opacity 0.2s ease;
-      background: #f5f5f0; overflow: hidden;
-    }
-    .screen.active { opacity: 1; pointer-events: all; }
-    .screen.exit { opacity: 0; }
-  </style>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-  <!-- App 容器：所有畫面（含登入）統一在此 400px 容器內 -->
-  <div id="app-container" style="display:block;">
+  <!-- 登入與角色選擇畫面 -->
+  <div id="screen-login" class="screen active" style="background:#1a1a2e;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;padding:20px">
+    <div style="width:56px;height:56px;border-radius:14px;background:#2d4a3e;display:flex;align-items:center;justify-content:center;margin-bottom:14px">
+      <span style="font-size:24px;color:#a8d5b5;font-weight:500">L</span>
+    </div>
+    <div style="font-size:22px;font-weight:500;color:#e8d5b7;margin-bottom:5px">LearnMate AI</div>
+    <div style="font-size:12px;color:rgba(232,213,183,0.45);margin-bottom:32px">智慧自律學習平台</div>
 
-    <!-- 登入與角色選擇畫面 -->
-    <div id="screen-login" class="screen active" style="background:#1a1a2e;">
-      <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:0;padding:20px">
-        <div style="width:56px;height:56px;border-radius:14px;background:#2d4a3e;display:flex;align-items:center;justify-content:center;margin-bottom:14px">
-          <span style="font-size:24px;color:#a8d5b5;font-weight:500">L</span>
-        </div>
-        <div style="font-size:22px;font-weight:500;color:#e8d5b7;margin-bottom:5px">LearnMate AI</div>
-        <div style="font-size:12px;color:rgba(232,213,183,0.45);margin-bottom:32px">智慧自律學習平台</div>
-
-        <div style="width:100%; max-width: 320px; background: rgba(255,255,255,0.05); border-radius: 16px; padding: 20px; margin-bottom: 20px;">
-          <div style="margin-bottom: 12px;">
-            <label style="color: #e8d5b7; font-size: 12px; margin-bottom: 4px; display: block;">家庭代碼 (Family Code)</label>
-            <input type="text" id="family-code-input" value="DEMO999" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid rgba(232,213,183,0.3); background: rgba(0,0,0,0.2); color: white; box-sizing:border-box;">
-          </div>
-        </div>
-
-        <div onclick="loginAsParent()" style="background:#fff;border-radius:16px;padding:16px 20px;width:100%; max-width:320px; margin-bottom:10px;cursor:pointer;position:relative">
-          <div style="font-size:22px;margin-bottom:6px">👩‍👦</div>
-          <div style="font-size:14px;font-weight:500;color:#0f0f14;margin-bottom:3px">我是家長</div>
-          <div style="font-size:11px;color:#9ca3af">設定孩子課表、查看學習狀態、出補強題</div>
-          <div style="position:absolute;right:16px;top:50%;transform:translateY(-50%);width:30px;height:30px;background:#1a1a2e;border-radius:50%;display:flex;align-items:center;justify-content:center">
-            <span style="color:#e8d5b7;font-size:14px">→</span>
-          </div>
-        </div>
-
-        <div onclick="loginAsStudent()" style="background:#2d4a3e;border-radius:16px;padding:16px 20px;width:100%; max-width:320px; cursor:pointer;position:relative">
-          <div style="font-size:22px;margin-bottom:6px">🧒</div>
-          <div style="font-size:14px;font-weight:500;color:#e8d5b7;margin-bottom:3px">我是學生</div>
-          <div style="font-size:11px;color:rgba(232,213,183,0.55)">開始今天的讀書，賺點數換獎勵</div>
-          <div style="position:absolute;right:16px;top:50%;transform:translateY(-50%);width:30px;height:30px;background:#1d6b50;border-radius:50%;display:flex;align-items:center;justify-content:center">
-            <span style="color:#a8d5b5;font-size:14px">→</span>
-          </div>
-        </div>
-
-        <div style="font-size:10px;color:rgba(232,213,183,0.2);margin-top:20px" id="version-label">Demo v2.0 · API Mode · AI Powered</div>
+    <!-- 登入表單 -->
+    <div style="width:100%; max-width: 320px; background: rgba(255,255,255,0.05); border-radius: 16px; padding: 20px; margin-bottom: 20px;">
+      <div style="margin-bottom: 12px;">
+        <label style="color: #e8d5b7; font-size: 12px; margin-bottom: 4px; display: block;">家庭代碼 (Family Code)</label>
+        <input type="text" id="family-code-input" value="DEMO999" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid rgba(232,213,183,0.3); background: rgba(0,0,0,0.2); color: white;">
       </div>
     </div>
 
-    <!-- === 家長端畫面 === -->
+    <!-- Gemini AI Key 輸入區已移除 -->
 
+    <div onclick="loginAsParent()" style="background:#fff;border-radius:16px;padding:16px 20px;width:100%; max-width:320px; margin-bottom:10px;cursor:pointer;position:relative">
+      <div style="font-size:22px;margin-bottom:6px">👩‍👦</div>
+      <div style="font-size:14px;font-weight:500;color:#0f0f14;margin-bottom:3px">我是家長</div>
+      <div style="font-size:11px;color:#9ca3af">設定孩子課表、查看學習狀態、出補強題</div>
+      <div style="position:absolute;right:16px;top:50%;transform:translateY(-50%);width:30px;height:30px;background:#1a1a2e;border-radius:50%;display:flex;align-items:center;justify-content:center">
+        <span style="color:#e8d5b7;font-size:14px">→</span>
+      </div>
+    </div>
+
+    <div onclick="loginAsStudent()" style="background:#2d4a3e;border-radius:16px;padding:16px 20px;width:100%; max-width:320px; cursor:pointer;position:relative">
+      <div style="font-size:22px;margin-bottom:6px">🧒</div>
+      <div style="font-size:14px;font-weight:500;color:#e8d5b7;margin-bottom:3px">我是學生</div>
+      <div style="font-size:11px;color:rgba(232,213,183,0.55)">開始今天的讀書，賺點數換獎勵</div>
+      <div style="position:absolute;right:16px;top:50%;transform:translateY(-50%);width:30px;height:30px;background:#1d6b50;border-radius:50%;display:flex;align-items:center;justify-content:center">
+        <span style="color:#a8d5b5;font-size:14px">→</span>
+      </div>
+    </div>
+    
+    <div style="font-size:10px;color:rgba(232,213,183,0.2);margin-top:20px" id="version-label">Demo v1.0 · API Mode</div>
+  </div>
+
+  <script>
+    // 預設 AI 模式狀態（後端處理）
+    window.addEventListener('DOMContentLoaded', () => {
+      // 可以在此加入其他初始化邏輯
+    });
+  </script>
+
+  <!-- App 容器 (登入後顯示) -->
+  <div id="app-container" style="display:none; width:100%; height:100%; max-width:400px; margin:0 auto; position:relative; background:#f5f5f0; overflow:hidden;">
+    
+    <!-- === 家長端畫面 === -->
+    
     <!-- P1: 今日快覽 -->
     <div id="screen-parent-home" class="screen p-screen">
       <div class="p-topbar">
@@ -96,11 +79,6 @@
           <div class="stat-item"><div class="stat-val" id="p-stat-rate">82%</div><div class="stat-lbl">本週完成率</div></div>
           <div class="stat-item"><div class="stat-val" id="p-stat-accuracy">71%</div><div class="stat-lbl">各科正確率</div></div>
           <div class="stat-item"><div class="stat-val" id="p-stat-streak">🔥0</div><div class="stat-lbl">連勤天數</div></div>
-        </div>
-
-        <!-- 待確認任務面板 (BUG-06 修復：新增此元素) -->
-        <div id="p-review-panel" style="display:none;background:#fff;border-radius:12px;border:0.5px solid #e5e7eb;padding:12px 14px;margin-bottom:8px">
-          <!-- 動態產生待確認任務 -->
         </div>
 
         <div class="p-card">
@@ -286,7 +264,6 @@
             <div><div style="font-size:10px;color:#888;margin-bottom:2px">社會</div><select id="set-ed-社會" style="width:100%;padding:6px;border-radius:4px;border:1px solid #d1d5db"><option>翰林版</option><option>康軒版</option><option>南一版</option></select></div>
             <div><div style="font-size:10px;color:#888;margin-bottom:2px">自然</div><select id="set-ed-自然" style="width:100%;padding:6px;border-radius:4px;border:1px solid #d1d5db"><option>翰林版</option><option>康軒版</option><option>南一版</option></select></div>
             <div><div style="font-size:10px;color:#888;margin-bottom:2px">英語</div><select id="set-ed-英語" style="width:100%;padding:6px;border-radius:4px;border:1px solid #d1d5db"><option>康軒版</option><option>南一版</option><option>翰林版</option></select></div>
-          </div>
           </div>
           
           <div style="height:1px;background:#e5e7eb;margin:16px 0"></div>
