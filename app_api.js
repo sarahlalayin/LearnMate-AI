@@ -118,7 +118,7 @@ async function loginAsParent() {
       currentUser = 'parent';
       currentFamilyId = data.family._id;
       document.getElementById('screen-login').classList.remove('active');
-      document.getElementById('app-container').style.display = 'flex';
+      document.getElementById('app-container').style.display = 'block';
       await syncAndRender();
       navTo('screen-parent-home');
     } else { alert('登入失敗：' + (data.error || '')); }
@@ -149,7 +149,7 @@ async function loginAsStudent() {
       currentUser = 'student';
       currentFamilyId = data.family._id;
       document.getElementById('screen-login').classList.remove('active');
-      document.getElementById('app-container').style.display = 'flex';
+      document.getElementById('app-container').style.display = 'block';
       await syncAndRender();
       navTo('screen-student-home');
     } else { alert('登入失敗：' + (data.error || '')); }
