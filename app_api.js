@@ -117,8 +117,6 @@ async function loginAsParent() {
     if(data.success) {
       currentUser = 'parent';
       currentFamilyId = data.family._id;
-      document.getElementById('screen-login').classList.remove('active');
-      document.getElementById('app-container').style.display = 'block';
       await syncAndRender();
       navTo('screen-parent-home');
     } else { alert('登入失敗：' + (data.error || '')); }
@@ -148,8 +146,6 @@ async function loginAsStudent() {
     if(data.success) {
       currentUser = 'student';
       currentFamilyId = data.family._id;
-      document.getElementById('screen-login').classList.remove('active');
-      document.getElementById('app-container').style.display = 'block';
       await syncAndRender();
       navTo('screen-student-home');
     } else { alert('登入失敗：' + (data.error || '')); }
@@ -162,14 +158,13 @@ async function loginAsStudent() {
 }
 
 function logout() {
-  document.getElementById('app-container').style.display = 'none';
   const current = document.getElementById(currentScreen);
   if(current) current.classList.remove('active');
-  currentScreen = 'screen-login';
-  document.getElementById('screen-login').classList.add('active');
   currentUser = null;
   currentFamilyId = null;
   globalDB = null;
+  currentScreen = 'screen-login';
+  navTo('screen-login');
 }
 
 // --- 家長端邏輯 ---
