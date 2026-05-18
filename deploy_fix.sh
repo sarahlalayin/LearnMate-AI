@@ -1,32 +1,18 @@
-# ===================================================
-# LearnMate — 修復 Render 部署 ENOENT 錯誤
-# 在 Git Bash 或 VSCode Terminal 中執行以下指令
-# ===================================================
+## 問題修復：學生畫面全螢幕
 
-# 1. 切換到專案目錄
+### 更新檔案清單
+1. `style.css` - 核心 CSS 修復
+2. `index_api.html` - 移除重複 inline style
+3. `app_api.js` - 修正 display:flex
+
+### Git 指令（在 VSCode Terminal 或 Git Bash 執行）
+
+```bash
 cd "D:/行政/2026 AI PM班/第7組/learnmate_app"
 
-# 2. 確認 index_api.html 存在
-ls -la index_api.html
-ls -la index.html
+git add style.css index_api.html app_api.js backend/server.js
 
-# 3. 把所有修改的檔案加入 Git
-git add index_api.html
-git add app_api.js
-git add index.html
-git add backend/server.js
-git add style.css
+git commit -m "fix: 修復學生畫面全螢幕問題 + 修復 Render ENOENT 錯誤"
 
-# 4. 查看狀態確認
-git status
-
-# 5. Commit
-git commit -m "fix: 修復 Render 部署 ENOENT 錯誤 (index_api.html 未 commit) + 補全 approveProposal/rejectProposal API"
-
-# 6. 推送到 GitHub (會自動觸發 Render 重新部署)
 git push origin main
-
-# ===================================================
-# 如果 push 時問帳號密碼，請輸入 GitHub 的
-# Username 和 Personal Access Token (不是密碼)
-# ===================================================
+```

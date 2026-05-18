@@ -1,6 +1,29 @@
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-html, body { height: 100%; width: 100%; overflow: hidden; }
-body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #000; color: #333; }
+html, body { height: 100%; width: 100%; overflow: hidden; background: #000; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #333; display: flex; justify-content: center; align-items: flex-start; }
+
+/* ===== App 容器：手機版面框，所有畫面的定位基準 ===== */
+#app-container {
+  position: relative;
+  width: 100%;
+  max-width: 400px;
+  height: 100vh;
+  margin: 0 auto;
+  background: #f5f5f0;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+/* 登入畫面單獨全螢幕置中 */
+#screen-login {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
 
 .screen {
   position: absolute; inset: 0;
