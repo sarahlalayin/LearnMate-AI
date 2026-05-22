@@ -50,13 +50,23 @@ const API_BASE = window.location.protocol === 'file:' ? 'http://localhost:5000/a
 let globalDB = null;
 let currentFamilyId = null;
 
+let syncInterval = null;
+
 async function syncAndRender() {
+  if (!currentFamilyId) return;
   try {
     const res = await fetch(`${API_BASE}/sync/${currentFamilyId}`);
     const data = await res.json();
     if(data.success) {
+      const oldStr = JSON.stringify(globalDB);
+      const newStr = JSON.stringify(data.db);
       globalDB = data.db;
-      updateScreenData(currentScreen);
+      // 只有當資料真正改變，且不在輸入中畫面時，才重新渲染，避免覆蓋使用者的輸入
+      if (oldStr !== newStr) {
+        if (currentScreen !== 'screen-parent-settings' && currentScreen !== 'screen-student-choose') {
+          updateScreenData(currentScreen);
+        }
+      }
     }
   } catch(e) { console.error('API Sync Error:', e); }
 }
@@ -120,6 +130,7 @@ async function loginAsParent() {
       document.getElementById('screen-login').classList.remove('active');
       document.getElementById('app-container').style.display = 'block';
       await syncAndRender();
+      if (!syncInterval) syncInterval = setInterval(syncAndRender, 3000);
       navTo('screen-parent-home');
     } else { alert('登入失敗：' + (data.error || '')); }
   } catch(e) { 
@@ -151,6 +162,7 @@ async function loginAsStudent() {
       document.getElementById('screen-login').classList.remove('active');
       document.getElementById('app-container').style.display = 'block';
       await syncAndRender();
+      if (!syncInterval) syncInterval = setInterval(syncAndRender, 3000);
       navTo('screen-student-home');
     } else { alert('登入失敗：' + (data.error || '')); }
   } catch(e) { 
@@ -166,6 +178,7 @@ function logout() {
   currentUser = null;
   currentFamilyId = null;
   globalDB = null;
+  if (syncInterval) { clearInterval(syncInterval); syncInterval = null; }
   navTo('screen-login');
 }
 
