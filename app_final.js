@@ -505,7 +505,19 @@ function addHabit() {
   if (!name) return alert('請輸入習慣名稱');
   const db = getDB();
   if(!db.activities) db.activities = [];
-  db.activities.push({ id: Date.now().toString(), name, icon, category, points });
+  const actId = Date.now().toString();
+  db.activities.push({ id: actId, name, icon, category, points });
+  
+  // 同步派送到學生的任務清單中
+  db.tasks.push({ 
+    id: 'act_' + actId, 
+    subject: category, 
+    topic: name, 
+    status: 'pending', 
+    points: points, 
+    isHabit: true, 
+    icon: icon 
+  });
   saveDB(db);
   document.getElementById('habit-name').value = '';
   document.getElementById('habit-icon').value = '⭐';
@@ -682,8 +694,10 @@ function renderStudentHome(db) {
   taskList.innerHTML = db.tasks.map(t => {
     let icon = '📖';
     if(t.subject==='數學') icon='🔢'; else if(t.subject==='社會') icon='🌍'; else if(t.subject==='英語') icon='💬'; else if(t.subject==='自然') icon='🔬';
+    if(t.isHabit && t.icon) icon = t.icon;
     
     let edition = db.profile && db.profile.editions ? db.profile.editions[t.subject] || '通用版' : '通用版';
+    if(t.isHabit) edition = '習慣與活動';
 
     if(t.status === 'completed') {
       return `
@@ -699,7 +713,7 @@ function renderStudentHome(db) {
           <div class="subj-icon" style="background:#FEFCBF"><span style="font-size:15px">${icon}</span></div>
           <div style="flex:1"><div class="subj-name">${t.subject}</div><div class="subj-meta">${t.topic} · ${edition}</div></div>
           <div style="display:flex;gap:5px">
-            <div onclick="startQuiz('${t._id || t.id}', '${t.subject}')" class="p-btn p-btn-dark" style="font-size:11px;padding:5px 10px">開始</div>
+            <div onclick="${t.isHabit ? `finishHabit('${t.id}')` : `startQuiz('${t._id || t.id}', '${t.subject}')`}" class="p-btn p-btn-dark" style="font-size:11px;padding:5px 10px">${t.isHabit ? '完成打卡' : '開始'}</div>
             <div onclick="prepSkip('${t._id || t.id}', '${t.subject}')" class="p-btn p-btn-ghost" style="font-size:11px;padding:5px 10px">先跳過?</div>
           </div>
         </div>
@@ -720,12 +734,13 @@ function renderStudentChoose(db) {
   list.innerHTML = pending.map(t => {
     let icon = '📖';
     if(t.subject==='數學') icon='🔢'; else if(t.subject==='社會') icon='🌍'; else if(t.subject==='英語') icon='💬'; else if(t.subject==='自然') icon='🔬';
+    if(t.isHabit && t.icon) icon = t.icon;
     return `
-      <div class="drag-card" onclick="startQuiz('${t._id || t.id}', '${t.subject}')">
+      <div class="drag-card" onclick="${t.isHabit ? `finishHabit('${t.id}')` : `startQuiz('${t._id || t.id}', '${t.subject}')`}">
         <div style="font-size:15px;color:#d1d5db;padding-right:2px">⋮⋮</div>
         <div class="subj-icon" style="background:#f3f4f6;width:34px;height:34px"><span style="font-size:15px">${icon}</span></div>
         <div style="flex:1"><div style="font-size:13px;font-weight:500;color:#0f0f14">${t.subject} · ${t.topic}</div></div>
-        <div class="p-btn p-btn-dark" style="font-size:11px;padding:5px 10px">開始</div>
+        <div class="p-btn p-btn-dark" style="font-size:11px;padding:5px 10px">${t.isHabit ? '打卡' : '開始'}</div>
       </div>
     `;
   }).join('');
@@ -1056,6 +1071,24 @@ function confirmSkip() {
   saveDB(db);
   alert('已確認暫停。');
   navTo('screen-student-home');
+}
+
+function finishHabit(taskId) {
+  const db = getDB();
+  const task = db.tasks.find(t => String(t.id) === String(taskId));
+  if(task) {
+    task.status = 'completed';
+    db.points += (task.points || 10);
+    db.alerts.unshift({ 
+        id: Date.now(), 
+        type: 'positive', 
+        title: `✨ 習慣打卡審查：${task.topic}`, 
+        desc: `孩子已完成「${task.topic}」並獲得 ${task.points || 10} 點，請核對是否確實完成！` 
+    });
+    saveDB(db);
+    alert(`打卡成功！已送出審查並獲得 ${task.points || 10} 點！`);
+    updateScreenData(currentScreen);
+  }
 }
 
 // --- 監聽 Storage 事件，實現跨分頁即時同步 ---
