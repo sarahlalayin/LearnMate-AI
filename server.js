@@ -822,8 +822,8 @@ app.get('*', (req, res) => {
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`🚀 LearnMate 伺服器已啟動於 port ${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 LearnMate 伺服器已啟動於 port ${PORT} (0.0.0.0)`);
   console.log(`✅ AI 功能：Gemini 2.0 Flash / 考題生成 / 影片推薦 / 週報分析`);
   console.log(`🌐 前端頁面會暴露於 http://localhost:${PORT}`);
 });
