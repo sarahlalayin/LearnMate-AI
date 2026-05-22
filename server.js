@@ -348,9 +348,6 @@ app.post('/api/tasks/approve-extra', async (req, res) => {
     }
     await family.save();
     if (message) await Message.create({ familyId, text: message, from: 'parent' });
-    await Alert.create({ familyId, type: 'positive',
-      title: `✅ 確認完成：${task.subject}`,
-      desc: `「${task.topic}」已確認完成，給予 ${pts} 點！` });
     res.json({ success: true, points: family.points });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -363,9 +360,6 @@ app.post('/api/tasks/reject-extra', async (req, res) => {
     const { familyId, taskId, message } = req.body;
     await Task.findByIdAndUpdate(taskId, { status: 'pending', earnedPoints: 0 });
     if (message) await Message.create({ familyId, text: message, from: 'parent' });
-    await Alert.create({ familyId, type: 'warning',
-      title: '任務退回重做',
-      desc: `家長已退回「${message || '請再努力完成任務！'}」` });
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -478,7 +472,6 @@ app.post('/api/rewards/propose', async (req, res) => {
   try {
     const { familyId, name, icon } = req.body;
     const newReward = await Reward.create({ familyId, name, icon, cost: 0, proposedBy: 'student', status: 'proposed' });
-    await Alert.create({ familyId, type: 'positive', title: `✨ 新獎勵許願：${name}`, desc: `孩子提議將「${icon} ${name}」加入清單，快去設定點數吧！` });
     res.json({ success: true, reward: newReward });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -496,9 +489,6 @@ app.post('/api/rewards/approve-proposal', async (req, res) => {
     );
     if (!reward) return res.status(404).json({ success: false, error: '找不到獎勵' });
     if (message) await Message.create({ familyId, text: message, from: 'parent' });
-    await Alert.create({ familyId, type: 'positive',
-      title: `✅ 爸媽同意了你的新獎勵：${reward.name}`,
-      desc: `「${reward.icon} ${reward.name}」已加入兌換清單，目標 ${cost} 點！繼續加油吧！` });
     res.json({ success: true, reward });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -511,9 +501,6 @@ app.post('/api/rewards/reject-proposal', async (req, res) => {
     const { familyId, rewardId, message } = req.body;
     await Reward.findByIdAndDelete(rewardId);
     if (message) await Message.create({ familyId, text: message, from: 'parent' });
-    await Alert.create({ familyId, type: 'warning',
-      title: '爸媽婉拒了你的獎勵提議',
-      desc: message || '謝謝你的提議！我們一起想想別的獎勵吧。' });
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -531,7 +518,6 @@ app.post('/api/rewards/claim', async (req, res) => {
       await family.save();
       reward.requests.push({ status: 'pending' });
       await reward.save();
-      await Alert.create({ familyId, type: 'positive', title: `🎁 兌換申請：${reward.name}`, desc: `孩子花費了 ${reward.cost} 點申請兌換「${reward.icon} ${reward.name}」。` });
       res.json({ success: true, points: family.points });
     } else {
       res.status(400).json({ success: false, error: '點數不足' });

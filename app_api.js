@@ -639,8 +639,8 @@ function renderParentRewards(db) {
         <div style="background:#fffbeb;border:1px solid #f6c344;border-radius:8px;padding:10px;margin-bottom:6px">
           <div style="font-size:13px;font-weight:500;margin-bottom:4px">${r.icon} ${r.name}</div>
           <div style="display:flex;gap:6px">
-            <button class="p-btn p-btn-dark" style="font-size:10px" onclick="approveProposal(${r.id})">同意並設定點數</button>
-            <button class="p-btn p-btn-ghost" style="font-size:10px" onclick="rejectProposal(${r.id})">婉拒</button>
+            <button class="p-btn p-btn-dark" style="font-size:10px" onclick="approveProposal('${r._id || r.id}')">同意並設定點數</button>
+            <button class="p-btn p-btn-ghost" style="font-size:10px" onclick="rejectProposal('${r._id || r.id}')">婉拒</button>
           </div>
         </div>
       `;
@@ -660,8 +660,8 @@ function renderParentRewards(db) {
               <div style="font-size:10px;color:#276749">扣 ${r.cost} 點</div>
             </div>
             <div style="display:flex;gap:6px">
-              <button class="p-btn p-btn-green" style="font-size:10px" onclick="approveRedeem(${req.id})">同意並留言</button>
-              <button class="p-btn p-btn-ghost" style="font-size:10px" onclick="rejectRedeem(${req.id})">婉拒</button>
+              <button class="p-btn p-btn-green" style="font-size:10px" onclick="approveRedeem('${req._id || req.id}')">同意並留言</button>
+              <button class="p-btn p-btn-ghost" style="font-size:10px" onclick="rejectRedeem('${req._id || req.id}')">婉拒</button>
             </div>
           </div>
         `;
@@ -874,7 +874,7 @@ function renderStudentRewards(db) {
               <div style="font-size:13px;font-weight:500;color:#0f0f14">${r.name}</div>
               <div style="font-size:10px;color:#276749;margin-top:3px">爸媽已同意，趕快去領取！</div>
             </div>
-            <div class="p-btn p-btn-ghost" style="font-size:10px;padding:5px 9px;opacity:0.6" onclick="useApprovedReward(${req.id})">標記為已使用</div>
+            <div class="p-btn p-btn-ghost" style="font-size:10px;padding:5px 9px;opacity:0.6" onclick="useApprovedReward('${req._id || req.id}')">標記為已使用</div>
           </div>
         `;
       }
