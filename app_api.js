@@ -200,15 +200,20 @@ function renderParentHome(db) {
       </div>`;
   }
 
-  // ★ 待確認任務取得
+  // ★ 待確認任務取得 (包含任務、獎勵兌換申請、獎勵許願)
   const submittedTasks = (db.extraTasks || []).filter(t => t.status === 'submitted');
+  const pendingClaims = (db.rewardRequests || []).filter(r => r.status === 'pending');
+  const proposedRewards = (db.rewards || []).filter(r => r.status === 'proposed');
+  
+  const totalPending = submittedTasks.length + pendingClaims.length + proposedRewards.length;
   const reviewPanel = document.getElementById('p-review-panel');
   if (reviewPanel) {
-    if (submittedTasks.length > 0) {
+    if (totalPending > 0) {
       reviewPanel.style.display = 'block';
-      reviewPanel.innerHTML = `
-        <div style="font-size:13px;font-weight:600;color:#0f0f14;margin-bottom:8px">⏳ 待確認項目（${submittedTasks.length}）</div>
-        ${submittedTasks.map(t => `
+      let html = `<div style="font-size:13px;font-weight:600;color:#0f0f14;margin-bottom:8px">⏳ 待確認項目（${totalPending}）</div>`;
+      
+      // 1. 任務審核
+      html += submittedTasks.map(t => `
           <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:10px;margin-bottom:6px">
             <div style="font-size:13px;font-weight:500;margin-bottom:6px">${t.isActivity ? '🏅' : '📝'} ${t.subject} · ${t.topic}</div>
             <div style="font-size:10px;color:#9ca3af;margin-bottom:8px">${t.isActivity ? '習慣打卡' : `答題完成 · 預計積分 ${t.earnedPoints || 15} 點`}</div>
@@ -217,8 +222,36 @@ function renderParentHome(db) {
               <button onclick="rejectExtra('${t._id}')" class="p-btn p-btn-ghost" style="flex:1;font-size:11px;padding:6px">↩ 退回重做</button>
             </div>
           </div>
-        `).join('')}
-      `;
+      `).join('');
+
+      // 2. 獎勵兌換申請
+      html += pendingClaims.map(req => {
+        const r = db.rewards.find(x => x._id === req.rewardId || x.id === req.rewardId) || {};
+        return `
+          <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:10px;margin-bottom:6px">
+            <div style="font-size:13px;font-weight:500;margin-bottom:6px">🎁 兌換申請：${r.icon || ''} ${r.name || '獎勵'}</div>
+            <div style="font-size:10px;color:#9ca3af;margin-bottom:8px">花費 ${r.cost || 0} 點</div>
+            <div style="display:flex;gap:6px">
+              <button onclick="approveRedeem('${req._id || req.id}')" class="p-btn p-btn-green" style="flex:1;font-size:11px;padding:6px">✅ 同意兌換</button>
+              <button onclick="rejectRedeem('${req._id || req.id}')" class="p-btn p-btn-ghost" style="flex:1;font-size:11px;padding:6px">↩ 婉拒</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      // 3. 獎勵許願
+      html += proposedRewards.map(r => `
+          <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:10px;margin-bottom:6px">
+            <div style="font-size:13px;font-weight:500;margin-bottom:6px">✨ 新獎勵許願：${r.icon} ${r.name}</div>
+            <div style="font-size:10px;color:#9ca3af;margin-bottom:8px">請設定目標點數</div>
+            <div style="display:flex;gap:6px">
+              <button onclick="approveProposal('${r._id || r.id}')" class="p-btn p-btn-dark" style="flex:1;font-size:11px;padding:6px">✍ 設定點數</button>
+              <button onclick="rejectProposal('${r._id || r.id}')" class="p-btn p-btn-ghost" style="flex:1;font-size:11px;padding:6px">↩ 婉拒</button>
+            </div>
+          </div>
+      `).join('');
+
+      reviewPanel.innerHTML = html;
     } else {
       reviewPanel.style.display = 'none';
     }
