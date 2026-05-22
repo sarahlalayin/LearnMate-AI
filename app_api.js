@@ -499,7 +499,19 @@ async function addHabit() {
       document.getElementById('habit-name').value = '';
       document.getElementById('habit-icon').value = '⭐';
       document.getElementById('habit-points').value = '10';
+      
+      // Auto dispatch to student
+      try {
+        await fetch(`${API_BASE}/tasks/create-activity`, {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ familyId: currentFamilyId, subject: category, topic: name })
+        });
+      } catch(e) {
+        console.warn('Auto dispatch activity failed', e);
+      }
+      
       await syncAndRender();
+      alert('習慣已新增，並同步派送至學生端！');
     } else { alert('新增失敗'); }
   } catch(e) { alert('新增失敗'); }
 }
@@ -582,13 +594,9 @@ async function saveSettings() {
   const grade = document.getElementById('set-grade').value;
   const editions = {};
   
-  const rows = document.querySelectorAll('.subject-setting-row');
-  rows.forEach(row => {
-    const sub = row.querySelector('.sub-name-input').value.trim();
-    const ed = row.querySelector('.sub-ed-input').value.trim() || '通用版';
-    if (sub) {
-      editions[sub] = ed;
-    }
+  ['國語','數學','社會','自然','英語'].forEach(sub => {
+    const el = document.getElementById(`set-ed-${sub}`);
+    if(el) editions[sub] = el.value;
   });
   
   if (Object.keys(editions).length === 0) {
