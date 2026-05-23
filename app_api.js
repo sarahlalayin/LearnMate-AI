@@ -881,6 +881,16 @@ function renderStudentHome(db) {
           <span style="background:#fef3c7;color:#d97706;font-size:9px;font-weight:500;padding:2px 7px;border-radius:10px">⏳ 審核中</span>
         </div>
       `;
+    } else if(t.status === 'rejected') {
+      return `
+        <div class="subj-row" style="background:rgba(239,68,68,0.05);border-radius:8px;padding:8px;margin:4px -2px;border:1px solid #fca5a5">
+          <div class="subj-icon" style="background:#fee2e2"><span style="font-size:15px">⚠️</span></div>
+          <div style="flex:1"><div class="subj-name" style="color:#ef4444">${t.subject}</div><div class="subj-meta" style="color:#ef4444">${t.topic} · 需重做</div></div>
+          <div style="display:flex;gap:5px">
+            <div onclick="startQuiz('${t._id || t.id}', '${t.subject}')" class="p-btn p-btn-dark" style="font-size:11px;padding:5px 10px;background:#ef4444">重新測驗</div>
+          </div>
+        </div>
+      `;
     } else {
       return `
         <div class="subj-row" style="background:rgba(26,26,46,0.03);border-radius:8px;padding:8px;margin:4px -2px;border:1px solid #1a1a2e">
@@ -1069,6 +1079,17 @@ function renderStudentExtra(db) {
               <div style="font-size:10px;color:#9ca3af">${t.isActivity ? '習慣打卡' : `答題完成 · 預計 ${t.earnedPoints || 15} 點`}</div>
             </div>
             <div style="background:#FEF9C3;border:1px solid #ECC94B;border-radius:20px;padding:4px 10px;font-size:10px;font-weight:500;color:#92600a;white-space:nowrap">⏳ 等待確認</div>
+          </div>
+        </div>`;
+    } else if (t.status === 'rejected') {
+      return `
+        <div class="p-card" style="border:1px solid #fca5a5; background:rgba(239,68,68,0.05)">
+          <div style="display:flex;align-items:center;gap:10px">
+            <div style="flex:1">
+              <div style="font-size:13px;font-weight:500;color:#ef4444;margin-bottom:5px">${t.subject} · ${t.topic}</div>
+              <div style="font-size:10px;color:#ef4444">${t.questions?.length || 0} 題 · 被退回需重做</div>
+            </div>
+            <div onclick="startExtraQuiz('${t._id || t.id}')" class="p-btn" style="background:#ef4444;font-size:12px;padding:8px 14px;flex-shrink:0">重新測驗</div>
           </div>
         </div>`;
     }

@@ -358,7 +358,7 @@ app.post('/api/tasks/approve-extra', async (req, res) => {
 app.post('/api/tasks/reject-extra', async (req, res) => {
   try {
     const { familyId, taskId, message } = req.body;
-    await Task.findByIdAndUpdate(taskId, { status: 'pending', earnedPoints: 0 });
+    await Task.findByIdAndUpdate(taskId, { status: 'rejected', earnedPoints: 0 });
     if (message) await Message.create({ familyId, text: message, from: 'parent' });
     res.json({ success: true });
   } catch (error) {
