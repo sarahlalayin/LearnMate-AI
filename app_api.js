@@ -865,6 +865,22 @@ function renderStudentHome(db) {
           <span style="background:#C6F6D5;color:#276749;font-size:9px;font-weight:500;padding:2px 7px;border-radius:10px">✓ 完成</span>
         </div>
       `;
+    } else if(t.status === 'skipped') {
+      return `
+        <div class="subj-row">
+          <div class="subj-icon" style="background:#fee2e2"><span style="font-size:15px">✗</span></div>
+          <div style="flex:1"><div class="subj-name" style="color:#ef4444">${t.subject}</div><div class="subj-meta" style="color:#fca5a5">${t.topic} · 已跳過</div></div>
+          <span style="background:#fee2e2;color:#ef4444;font-size:9px;font-weight:500;padding:2px 7px;border-radius:10px">✗ 已跳過</span>
+        </div>
+      `;
+    } else if(t.status === 'submitted') {
+      return `
+        <div class="subj-row">
+          <div class="subj-icon" style="background:#fef3c7"><span style="font-size:15px">⏳</span></div>
+          <div style="flex:1"><div class="subj-name">${t.subject}</div><div class="subj-meta">${t.topic} · 等待確認</div></div>
+          <span style="background:#fef3c7;color:#d97706;font-size:9px;font-weight:500;padding:2px 7px;border-radius:10px">⏳ 審核中</span>
+        </div>
+      `;
     } else {
       return `
         <div class="subj-row" style="background:rgba(26,26,46,0.03);border-radius:8px;padding:8px;margin:4px -2px;border:1px solid #1a1a2e">
@@ -1260,30 +1276,16 @@ async function finishQuiz() {
   const totalCount = activeQuiz.questions.length;
   const subject = document.getElementById('s-quiz-subject').textContent.replace(' (加強)', '');
 
-  // 日常任務：直接完成給分
-  if (activeQuiz.type === 'daily') {
-    try {
-      await fetch(`${API_BASE}/tasks/complete`, {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ familyId: currentFamilyId, taskId: activeQuiz.id,
-          pointsToAdd: earned, correctCount, totalCount, subject })
-      });
-      alert(`測驗完成！答對 ${correctCount}/${totalCount} 題，獲得 ${earned} 點！`);
-      await syncAndRender();
-      navTo('screen-student-home');
-    } catch(e) { alert('操作失敗'); }
-  } else {
-    // 加強題：送審等家長確認
-    try {
-      await fetch(`${API_BASE}/tasks/submit`, {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ taskId: activeQuiz.id, earnedPoints: earned, correctCount, totalCount, subject })
-      });
-      alert(`測驗完成！答對 ${correctCount}/${totalCount} 題，等待家長確認後獲得 ${earned} 點。`);
-      await syncAndRender();
-      navTo('screen-student-extra');
-    } catch(e) { alert('操作失敗'); }
-  }
+  try {
+    await fetch(`${API_BASE}/tasks/submit`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ taskId: activeQuiz.id, earnedPoints: earned, correctCount, totalCount, subject })
+    });
+    alert(`測驗完成！答對 ${correctCount}/${totalCount} 題，等待家長確認後獲得 ${earned} 點。`);
+    await syncAndRender();
+    if (activeQuiz.type === 'daily') navTo('screen-student-home');
+    else navTo('screen-student-extra');
+  } catch(e) { alert('操作失敗'); }
 }
 
 async function approveExtra(taskId) {
