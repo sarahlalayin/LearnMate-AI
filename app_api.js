@@ -214,7 +214,9 @@ function renderParentHome(db) {
   }
 
   // ★ 待確認任務取得 (包含任務、獎勵兌換申請、獎勵許願)
-  const submittedTasks = (db.extraTasks || []).filter(t => t.status === 'submitted');
+  const dailySubmitted = (db.tasks || []).filter(t => t.status === 'submitted');
+  const extraSubmitted = (db.extraTasks || []).filter(t => t.status === 'submitted');
+  const submittedTasks = [...dailySubmitted, ...extraSubmitted];
   const pendingClaims = (db.rewardRequests || []).filter(r => r.status === 'pending');
   const proposedRewards = (db.rewards || []).filter(r => r.status === 'proposed');
   
