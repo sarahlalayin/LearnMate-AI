@@ -555,8 +555,10 @@ async function addHabit() {
       } catch(e) {
         console.warn('Auto dispatch activity failed', e);
       }
-      
       await syncAndRender();
+      if (currentScreen === 'screen-parent-settings') {
+        renderHabitsScreen(globalDB);
+      }
       alert('習慣已新增，並同步派送至學生端！');
     } else { alert('新增失敗'); }
   } catch(e) { alert('新增失敗'); }
@@ -567,7 +569,12 @@ async function deleteHabit(activityId) {
   try {
     const res = await fetch(`${API_BASE}/family/${currentFamilyId}/activities/${activityId}`, { method: 'DELETE' });
     const data = await res.json();
-    if (data.success) { await syncAndRender(); }
+    if (data.success) { 
+      await syncAndRender(); 
+      if (currentScreen === 'screen-parent-settings') {
+        renderHabitsScreen(globalDB);
+      }
+    }
     else { alert('刪除失敗'); }
   } catch(e) { alert('刪除失敗'); }
 }
