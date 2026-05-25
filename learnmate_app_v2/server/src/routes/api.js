@@ -612,4 +612,24 @@ router.get('/api/sync/:familyId', async (req, res) => {
   }
 });
 
+// ==========================================
+// 重置測試資料 API
+// ==========================================
+router.post('/api/demo/reset', async (req, res) => {
+  try {
+    const { familyId } = req.body;
+    if (!familyId) return res.status(400).json({ success: false, error: 'Missing familyId' });
+    
+    await Family.findByIdAndDelete(familyId);
+    await Task.deleteMany({ familyId });
+    await Reward.deleteMany({ familyId });
+    await Alert.deleteMany({ familyId });
+    await Message.deleteMany({ familyId });
+    
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 module.exports = router;
