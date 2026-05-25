@@ -1018,7 +1018,7 @@ function nextQ() {
 function finishQuiz() {
   const db = getDB();
   if(activeQuiz.type === 'daily') {
-    const task = db.tasks.find(t => t.id === activeQuiz.id);
+    const task = db.tasks.find(t => String(t.id) === String(activeQuiz.id) || String(t._id) === String(activeQuiz.id));
     if(task) { 
       task.status = 'completed'; 
       db.points += 10;
@@ -1030,8 +1030,8 @@ function finishQuiz() {
       });
     }
   } else {
-    const task = db.extraTasks.find(t => t.id === activeQuiz.id);
-    db.extraTasks = db.extraTasks.filter(t => t.id !== activeQuiz.id);
+    const task = db.extraTasks.find(t => String(t.id) === String(activeQuiz.id) || String(t._id) === String(activeQuiz.id));
+    db.extraTasks = db.extraTasks.filter(t => String(t.id) !== String(activeQuiz.id) && String(t._id) !== String(activeQuiz.id));
     db.points += 15;
     if (task) {
       db.alerts.unshift({
