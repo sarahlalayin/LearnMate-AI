@@ -31,6 +31,7 @@ for (const dir of STATIC_CANDIDATES) {
 console.log(`📂 靜態目錄：${STATIC_DIR}（主頁：${INDEX_FILE}）`);
 
 app.use(express.static(STATIC_DIR, { index: INDEX_FILE }));
+app.use('/src', express.static(path.join(STATIC_DIR, '../src')));
 
 // 根路由 → 回傳主頁
 app.get('/', (req, res) => {
