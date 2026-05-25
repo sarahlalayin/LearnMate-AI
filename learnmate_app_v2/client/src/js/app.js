@@ -396,6 +396,14 @@ JSON 格式範例：
     pool.push({ q: '植物行光合作用需要什麼氣體？', opts: ['氧氣', '二氧化碳', '氮氣', '氫氣'], a: 1, exp: '光合作用吸收二氧化碳，釋放氧氣。' });
     pool.push({ q: '哪一部分負責吸收水分？', opts: ['葉子', '莖', '根', '花'], a: 2, exp: '根部從土壤吸收水分。' });
     pool.push({ q: '植物的「血管」是哪部分？', opts: ['葉脈', '維管束', '表皮', '氣孔'], a: 1, exp: '維管束輸送水分和養分。' });
+  } else if (subject === '國語') {
+    pool.push({ q: '下列哪個字的部首是「水」部？', opts: ['江', '樹', '山', '火'], a: 0, exp: '「江」的部首是水部。' });
+    pool.push({ q: '「興高采烈」的意思是？', opts: ['生氣的樣子', '非常高興的樣子', '難過的樣子', '害怕的樣子'], a: 1, exp: '形容非常高興、興致勃勃的樣子。' });
+    pool.push({ q: '下列哪個詞語是「反義詞」？', opts: ['高興/快樂', '黑/白', '美麗/漂亮', '大/巨大'], a: 1, exp: '黑和白意思相反。' });
+  } else if (subject === '社會') {
+    pool.push({ q: '台灣最長的河流是？', opts: ['淡水河', '濁水溪', '大甲溪', '高屏溪'], a: 1, exp: '濁水溪是台灣最長的河流。' });
+    pool.push({ q: '台灣的原住民族中，目前人口最多的是？', opts: ['阿美族', '排灣族', '泰雅族', '布農族'], a: 0, exp: '目前阿美族人口最多。' });
+    pool.push({ q: '台灣的氣候主要屬於？', opts: ['寒帶氣候', '溫帶氣候', '熱帶/副熱帶季風氣候', '乾燥氣候'], a: 2, exp: '台灣主要為熱帶與副熱帶季風氣候。' });
   } else {
     for (let i = 0; i < count; i++) {
       pool.push({ q: `關於「${topic}」第 ${i+1} 題（${edition} ${grade}年級）`, opts: ['選項A', '選項B', '選項C', '選項D'], a: 0, exp: 'Mock 示範題。' });
@@ -1011,10 +1019,28 @@ function finishQuiz() {
   const db = getDB();
   if(activeQuiz.type === 'daily') {
     const task = db.tasks.find(t => t.id === activeQuiz.id);
-    if(task) { task.status = 'completed'; db.points += 10; }
+    if(task) { 
+      task.status = 'completed'; 
+      db.points += 10;
+      db.alerts.unshift({
+        id: Date.now(),
+        type: 'positive',
+        title: `✨ 完成測驗：${task.subject}`,
+        desc: `孩子剛剛完成了「${task.topic}」，獲得了 10 點獎勵，快去給他一個大大的擁抱！`
+      });
+    }
   } else {
+    const task = db.extraTasks.find(t => t.id === activeQuiz.id);
     db.extraTasks = db.extraTasks.filter(t => t.id !== activeQuiz.id);
     db.points += 15;
+    if (task) {
+      db.alerts.unshift({
+        id: Date.now(),
+        type: 'positive',
+        title: `💪 完成加強練習：${task.subject}`,
+        desc: `孩子努力完成了您派發的加強練習「${task.topic}」，獲得了 15 點額外獎勵！`
+      });
+    }
   }
   saveDB(db);
   alert('測驗完成！獲得大量點數！');
