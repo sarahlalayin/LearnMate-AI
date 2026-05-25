@@ -50,9 +50,9 @@ const defaultDB = {
     }
   },
   tasks: [
-    { id: 1, subject: '國語', topic: '第十課', status: 'completed', points: 10 },
-    { id: 2, subject: '數學', topic: '第一~六單元總複習', status: 'completed', points: 10 },
-    { id: 3, subject: '社會', topic: '台灣歷史', status: 'completed', points: 10 },
+    { id: 1, subject: '國語', topic: '第十課', status: 'pending', points: 10 },
+    { id: 2, subject: '數學', topic: '第一~六單元總複習', status: 'pending', points: 10 },
+    { id: 3, subject: '社會', topic: '台灣歷史', status: 'pending', points: 10 },
     { id: 4, subject: '英語', topic: '現在進行式', status: 'pending', points: 10 },
     { id: 5, subject: '自然', topic: '植物的構造', status: 'pending', points: 10 }
   ],
