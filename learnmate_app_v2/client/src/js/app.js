@@ -1031,6 +1031,15 @@ function cancelQuiz() {
 let skipTaskId = null;
 let skipReason = null;
 
+
+function resetDemo() {
+  if (confirm('確定要將測試資料完全還原到初始狀態嗎？\n這將會清除目前所有測試進度、已完成任務及自訂習慣。')) {
+    localStorage.removeItem('learnmate_db');
+    alert('資料已重置！系統將自動重新整理。');
+    window.location.reload();
+  }
+}
+
 function prepSkip(taskId, subject) {
   skipTaskId = taskId;
   document.getElementById('s-skip-subject').textContent = subject;
