@@ -88,6 +88,8 @@ function getDB() {
   if(!db.messages) db.messages = [];
   if(!db.alerts) db.alerts = [];
   if(!db.rewards) db.rewards = defaultDB.rewards;
+  if(!db.profile) db.profile = defaultDB.profile;
+  if(!db.activities) db.activities = defaultDB.activities || [];
   return db;
 }
 function saveDB(db) { localStorage.setItem('learnmate_db', JSON.stringify(db)); }
@@ -114,6 +116,7 @@ function updateScreenData(screenId) {
   const db = getDB();
   if (screenId === 'screen-parent-home') renderParentHome(db);
   else if (screenId === 'screen-parent-alerts') renderParentAlerts(db);
+  else if (screenId === 'screen-parent-msg') renderParentMsg(db);
   else if (screenId === 'screen-parent-insights') renderParentInsights(db);
   else if (screenId === 'screen-parent-settings') { renderParentSettings(db); renderHabitsScreen(db); }
   else if (screenId === 'screen-parent-rewards') renderParentRewards(db);
@@ -189,6 +192,65 @@ function renderParentHome(db) {
           <div style="font-size:10px;color:#22c55e;line-height:1.4">小明已完成 ${completed} 項任務。</div>
         </div>
       </div>`;
+  }
+
+  // ★ 待確認任務取得 (包含任務、獎勵兌換申請、獎勵許願)
+  const dailySubmitted = (db.tasks || []).filter(t => t.status === 'submitted');
+  const extraSubmitted = (db.extraTasks || []).filter(t => t.status === 'submitted');
+  const submittedTasks = [...dailySubmitted, ...extraSubmitted];
+  const pendingClaims = (db.rewardRequests || []).filter(r => r.status === 'pending');
+  const proposedRewards = (db.rewards || []).filter(r => r.status === 'proposed');
+  
+  const totalPending = submittedTasks.length + pendingClaims.length + proposedRewards.length;
+  const reviewPanel = document.getElementById('p-review-panel');
+  if (reviewPanel) {
+    if (totalPending > 0) {
+      reviewPanel.style.display = 'block';
+      let html = `<div style="font-size:13px;font-weight:600;color:#0f0f14;margin-bottom:8px">⏳ 待確認項目（${totalPending}）</div>`;
+      
+      // 1. 任務審核
+      html += submittedTasks.map(t => `
+          <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:10px;margin-bottom:6px">
+            <div style="font-size:13px;font-weight:500;margin-bottom:6px">${t.isHabit ? '🏅' : '📝'} ${t.subject} · ${t.topic}</div>
+            <div style="font-size:10px;color:#9ca3af;margin-bottom:8px">${t.isHabit ? '習慣打卡' : `答題完成 · 預計積分 ${t.points || 10} 點`}</div>
+            <div style="display:flex;gap:6px">
+              <button onclick="approveExtra('${t.id}')" class="p-btn p-btn-green" style="flex:1;font-size:11px;padding:6px;cursor:pointer;border:none;border-radius:6px;color:#fff;background:#2d4a3e">✅ 確認完成</button>
+              <button onclick="rejectExtra('${t.id}')" class="p-btn p-btn-ghost" style="flex:1;font-size:11px;padding:6px;cursor:pointer;border:1px solid #d1d5db;border-radius:6px;background:#fff;color:#555">↩ 退回重做</button>
+            </div>
+          </div>
+      `).join('');
+
+      // 2. 獎勵兌換申請
+      html += pendingClaims.map(req => {
+        const r = db.rewards.find(x => x.id === req.rewardId) || {};
+        return `
+          <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:10px;margin-bottom:6px">
+            <div style="font-size:13px;font-weight:500;margin-bottom:6px">🎁 兌換申請：${r.icon || ''} ${r.name || '獎勵'}</div>
+            <div style="font-size:10px;color:#9ca3af;margin-bottom:8px">花費 ${r.cost || 0} 點</div>
+            <div style="display:flex;gap:6px">
+              <button onclick="approveRedeem('${req.id}')" class="p-btn p-btn-green" style="flex:1;font-size:11px;padding:6px;cursor:pointer;border:none;border-radius:6px;color:#fff;background:#2d4a3e">✅ 同意兌換</button>
+              <button onclick="rejectRedeem('${req.id}')" class="p-btn p-btn-ghost" style="flex:1;font-size:11px;padding:6px;cursor:pointer;border:1px solid #d1d5db;border-radius:6px;background:#fff;color:#555">↩ 婉拒</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      // 3. 獎勵許願
+      html += proposedRewards.map(r => `
+          <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:10px;margin-bottom:6px">
+            <div style="font-size:13px;font-weight:500;margin-bottom:6px">✨ 新獎勵許願：${r.icon} ${r.name}</div>
+            <div style="font-size:10px;color:#9ca3af;margin-bottom:8px">請設定目標點數</div>
+            <div style="display:flex;gap:6px">
+              <button onclick="approveProposal('${r.id}')" class="p-btn p-btn-dark" style="flex:1;font-size:11px;padding:6px;cursor:pointer;border:none;border-radius:6px;color:#fff;background:#1a1a2e">✍ 設定點數</button>
+              <button onclick="rejectProposal('${r.id}')" class="p-btn p-btn-ghost" style="flex:1;font-size:11px;padding:6px;cursor:pointer;border:1px solid #d1d5db;border-radius:6px;background:#fff;color:#555">↩ 婉拒</button>
+            </div>
+          </div>
+      `).join('');
+
+      reviewPanel.innerHTML = html;
+    } else {
+      reviewPanel.style.display = 'none';
+    }
   }
 
   // 預警預覽
@@ -419,14 +481,72 @@ JSON 格式範例：
   return shuffled.slice(0, count).map(q => ({ q: q.q, opts: q.opts, a: q.a, exp: q.exp || '太棒了！', aiGenerated: false }));
 }
 
+// --- 派題選單動態生成 ---
+function renderParentMsg(db) {
+  const select = document.getElementById('topic-subject');
+  const btn = document.getElementById('gen-btn');
+  
+  if (select) {
+    const editions = db.profile?.editions || {};
+    const subs = Object.keys(editions);
+    const activityCategories = [...new Set((db.activities || []).map(a => a.category))];
+    
+    select.innerHTML = subs.map(s => `<option value="${s}">${s}</option>`).join('') +
+                       activityCategories.map(c => `<option value="${c}">⭐ ${c}</option>`).join('');
+                       
+    select.onchange = (e) => {
+      const isActivity = activityCategories.includes(e.target.value);
+      if(btn) btn.textContent = isActivity ? '直接派發任務 →' : '從題庫生成 →';
+    };
+    
+    // Trigger onchange to set initial button state
+    if(select.value) {
+      const isActivity = activityCategories.includes(select.value);
+      if(btn) btn.textContent = isActivity ? '直接派發任務 →' : '從題庫生成 →';
+    }
+  }
+}
+
 let mockGeneratedQuiz = [];
 async function generateQuiz() {
   const topic = document.getElementById('topic-input').value;
   const subject = document.getElementById('topic-subject').value;
   if (!topic.trim()) return alert('請輸入主題');
 
+  const db = getDB();
+  const activityCategories = [...new Set((db.activities || []).map(a => a.category))];
+  const isActivity = activityCategories.includes(subject);
+
   const btn = document.getElementById('gen-btn');
   btn.disabled = true;
+
+  if (isActivity) {
+    btn.textContent = '派發中...';
+    // 尋找此分類下的習慣範本 icon，預設用 '⭐'
+    const template = (db.activities || []).find(a => a.category === subject && a.name === topic) || 
+                     (db.activities || []).find(a => a.category === subject) || {};
+    const icon = template.icon || '⭐';
+    const points = template.points || 10;
+    
+    // 派送到學生的任務清單中
+    db.tasks.push({
+      id: 'act_' + Date.now(),
+      subject: subject,
+      topic: topic,
+      status: 'pending',
+      points: points,
+      isHabit: true,
+      icon: icon
+    });
+    saveDB(db);
+    btn.disabled = false;
+    btn.textContent = '直接派發任務 →';
+    alert('非學科任務已自動派發給學生！');
+    document.getElementById('topic-input').value = '';
+    updateScreenData(currentScreen);
+    return;
+  }
+
   btn.textContent = '✨ Gemini AI 生成中...';
 
   try {
@@ -666,6 +786,59 @@ function rejectRedeem(reqId) {
   }
 }
 
+function approveExtra(taskId) {
+  const msg = prompt('確認完成！要順便給孩子留言鼓勵嗎？(可留空不填)', '');
+  if (msg === null) return; // 按取消
+  
+  const db = getDB();
+  let task = db.tasks.find(t => String(t.id) === String(taskId));
+  let isDaily = true;
+  if (!task) {
+    task = db.extraTasks.find(t => String(t.id) === String(taskId));
+    isDaily = false;
+  }
+  
+  if (task) {
+    task.status = 'completed';
+    db.points += (task.points || (isDaily ? 10 : 15));
+    if (msg.trim() !== '') {
+      db.messages.push(`關於「${task.subject} · ${task.topic}」：${msg}`);
+    }
+    // 對於加強練習，完成後從加強清單中移除
+    if (!isDaily) {
+      db.extraTasks = db.extraTasks.filter(t => String(t.id) !== String(taskId));
+    }
+    saveDB(db);
+    alert('已確認！積分已發放給孩子。');
+    renderParentHome(db);
+  } else {
+    alert('找不到該任務');
+  }
+}
+
+function rejectExtra(taskId) {
+  const msg = prompt('請告訴孩子為什麼需要重做？', '請再認真完成一次！');
+  if (msg === null) return;
+  
+  const db = getDB();
+  let task = db.tasks.find(t => String(t.id) === String(taskId));
+  if (!task) {
+    task = db.extraTasks.find(t => String(t.id) === String(taskId));
+  }
+  
+  if (task) {
+    task.status = 'pending';
+    if (msg.trim() !== '') {
+      db.messages.push(`關於「${task.subject} · ${task.topic}」被退回：${msg}`);
+    }
+    saveDB(db);
+    alert('已退回，孩子會收到通知。');
+    renderParentHome(db);
+  } else {
+    alert('找不到該任務');
+  }
+}
+
 function switchToStudentRewards() {
   const current = document.getElementById(currentScreen);
   if(current) current.classList.remove('active');
@@ -875,14 +1048,15 @@ function proposeReward() {
 
 function renderStudentExtra(db) {
   const list = document.getElementById('s-extra-list');
-  if(db.extraTasks.length === 0) {
+  const pendingExtra = (db.extraTasks || []).filter(t => !t.status || t.status === 'pending');
+  if(pendingExtra.length === 0) {
     list.innerHTML = '<div style="text-align:center;padding:20px;color:#9ca3af;font-size:12px;">目前沒有加強練習。</div>';
     return;
   }
   
   const clearBtn = `<div style="text-align: right; margin-bottom: 8px;"><span onclick="clearExtraTasks()" style="font-size: 11px; color: #ef4444; cursor: pointer; padding: 4px;">🗑️ 清除所有派題</span></div>`;
   
-  list.innerHTML = clearBtn + db.extraTasks.map(t => `
+  list.innerHTML = clearBtn + pendingExtra.map(t => `
     <div class="p-card">
       <div style="display:flex;align-items:center;gap:10px">
         <div style="flex:1">
@@ -1026,25 +1200,23 @@ function finishQuiz() {
   if(activeQuiz.type === 'daily') {
     const task = db.tasks.find(t => String(t.id) === String(activeQuiz.id) || String(t._id) === String(activeQuiz.id));
     if(task) { 
-      task.status = 'completed'; 
-      db.points += 10;
+      task.status = 'submitted'; 
       db.alerts.unshift({
         id: Date.now(),
         type: 'positive',
-        title: `✨ 完成測驗：${task.subject}`,
-        desc: `孩子剛剛完成了「${task.topic}」，獲得了 10 點獎勵，快去給他一個大大的擁抱！`
+        title: `✨ 完成測驗送出審核：${task.subject}`,
+        desc: `孩子已完成「${task.topic}」，等待您的確認以發放 10 點獎勵！`
       });
     }
   } else {
     const task = db.extraTasks.find(t => String(t.id) === String(activeQuiz.id) || String(t._id) === String(activeQuiz.id));
-    db.extraTasks = db.extraTasks.filter(t => String(t.id) !== String(activeQuiz.id) && String(t._id) !== String(activeQuiz.id));
-    db.points += 15;
     if (task) {
+      task.status = 'submitted';
       db.alerts.unshift({
         id: Date.now(),
         type: 'positive',
-        title: `💪 完成加強練習：${task.subject}`,
-        desc: `孩子努力完成了您派發的加強練習「${task.topic}」，獲得了 15 點額外獎勵！`
+        title: `💪 加強練習送出審核：${task.subject}`,
+        desc: `孩子已努力完成您派發的加強練習「${task.topic}」，等待您的確認以發放 15 點額外獎勵！`
       });
     }
   }
