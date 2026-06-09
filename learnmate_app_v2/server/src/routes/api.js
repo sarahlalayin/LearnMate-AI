@@ -13,8 +13,10 @@ const Message = require('../models/Message');
 const Syllabus = require('../models/Syllabus');
 const ActivityTemplate = require('../models/ActivityTemplate');
 const Question = require('../models/Question');
-const { callGemini, buildQuizPrompt, buildVideoPrompt, buildInsightPrompt } = require('../services/aiService');
+const QuizFeedback = require('../models/QuizFeedback');
+const { callGemini, buildQuizPrompt, buildVideoPrompt, buildInsightPrompt, generateQuizWithCritic } = require('../services/aiService');
 const { searchYouTubeVideo } = require('../services/youtubeService');
+const { getPredictedUnit } = require('../services/curriculumService');
 
 
 const router = express.Router();
@@ -134,14 +136,32 @@ router.get('/api/tasks/:familyId', async (req, res) => {
   }
 });
 
-// 3. AI 考題生成 ★ 核心功能（優先從題庫抽題）
+// 3. AI 考題生成 ★ 核心功能（優先從題庫抽題，並結合進度偵測與 Critic Loop 審查）
 router.post('/api/tasks/generate', auth, checkSub, async (req, res) => {
   try {
     const { subject, topic, grade, edition, familyId, count = 5 } = req.body;
 
-    // 檢查是否處於段考複習模式 (Phase D2)
     const family = await Family.findById(familyId);
-    let finalTopic = topic;
+    if (!family) return res.status(404).json({ success: false, error: '找不到家庭帳戶' });
+
+    // ── 學習進度自動偵測與對齊 ─────────────────────────
+    let currentTopic = topic;
+    const cleanEdition = edition || family.profile?.editions?.get(subject) || '康軒版';
+    const cleanGrade = grade || family.profile?.grade || '5';
+
+    if (!currentTopic) {
+      // 學生未輸入主題，系統自動偵測學校進度
+      const offset = (family.profile?.progressOffset instanceof Map 
+        ? family.profile.progressOffset.get(subject) 
+        : family.profile?.progressOffset?.[subject]) || 0;
+      
+      const prediction = getPredictedUnit(cleanGrade, subject, cleanEdition, offset);
+      currentTopic = prediction.unit;
+      console.log(`📅 [Progress Alignment] 自動對齊學校進度：${subject} (${cleanEdition}) -> ${currentTopic}`);
+    }
+
+    // 檢查是否處於段考複習模式 (Phase D2)
+    let finalTopic = currentTopic;
     let examModeActive = false;
     let examRange = '';
 
@@ -152,18 +172,20 @@ router.post('/api/tasks/generate', auth, checkSub, async (req, res) => {
         if (subPrep && subPrep.range) {
           examModeActive = true;
           examRange = subPrep.range;
-          finalTopic = `${topic} (段考複習加重範圍：${examRange})`;
+          finalTopic = `${currentTopic} (段考複習加重範圍：${examRange})`;
           console.log(`🎯 [ExamPrep] 啟動段考複習出題加強！科目【${subject}】加重範圍為：${examRange}`);
         }
       }
     }
 
     // Step 1: 先從題庫 DB 隨機抽題
-    const dbQuestions = await Question.find({ subject, grade: grade || '6' });
+    const dbQuestions = await Question.find({ subject, grade: cleanGrade });
     console.log(`📚 [題庫] ${subject} 找到 ${dbQuestions.length} 題`);
 
     let questions = null;
     let fromDB = false;
+    let criticPassed = true;
+    let criticAttempts = 0;
 
     if (dbQuestions.length >= count) {
       const shuffled = [...dbQuestions].sort(() => Math.random() - 0.5);
@@ -171,14 +193,26 @@ router.post('/api/tasks/generate', auth, checkSub, async (req, res) => {
       fromDB = true;
       console.log(`✅ [題庫] 從 DB 隨機抽取 ${count} 題`);
     } else {
-      // Step 2: 題庫不足，嘗試 Gemini AI (使用 finalTopic 納入段考複習權重)
-      console.log(`⚠️ [題庫] 題目不足，改用 AI 生成。主題: ${finalTopic}`);
-      const syllabus = await Syllabus.findOne({ grade: grade || '6', subject, edition: edition || '通用版' });
-      const prompt = buildQuizPrompt(subject, finalTopic, grade || '6', edition || '通用版', count, syllabus?.content);
-      const rawText = await callGemini(prompt);
-      if (rawText) {
-        try { questions = JSON.parse(rawText); } catch (e) { questions = null; }
-      }
+      // Step 2: 題庫不足，使用多 Agent 協同出題與 Critic Loop 審查機制
+      console.log(`⚠️ [題庫] 題目不足，改用 AI 多 Agent 生成。主題: ${finalTopic}`);
+      
+      // 檢索該學科被家長回報的 Bad Cases 作為避雷針
+      const badCases = await QuizFeedback.find({ subject, status: { $ne: 'fixed' } })
+        .sort({ createdAt: -1 })
+        .limit(3);
+
+      const agentResult = await generateQuizWithCritic(
+        subject,
+        finalTopic,
+        cleanGrade,
+        cleanEdition,
+        count,
+        badCases
+      );
+
+      questions = agentResult.questions;
+      criticAttempts = agentResult.attempts;
+      criticPassed = agentResult.passed;
 
       // Step 3: 最終 Fallback
       if (!questions || !Array.isArray(questions) || questions.length === 0) {
@@ -191,14 +225,21 @@ router.post('/api/tasks/generate', auth, checkSub, async (req, res) => {
     }
 
     const newTask = await Task.create({
-      familyId, type: 'extra', subject, topic,
+      familyId, type: 'extra', subject, topic: finalTopic,
       totalQuestions: questions.length,
       questions,
       aiGenerated: !fromDB,
-      promptParams: { grade: grade || '6', edition: edition || '通用版' }
+      promptParams: { grade: cleanGrade, edition: cleanEdition }
     });
 
-    res.json({ success: true, task: newTask, fromDB, aiGenerated: !fromDB });
+    res.json({
+      success: true,
+      task: newTask,
+      fromDB,
+      aiGenerated: !fromDB,
+      criticPassed,
+      criticAttempts
+    });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -482,6 +523,116 @@ router.post('/api/profile/update', async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+// ==========================================
+// 學習進度偵測與微調 API (Syllabus & Progress)
+// ==========================================
+
+// A. 獲取預計週進度與單元
+router.get('/api/progress/predict', auth, async (req, res) => {
+  try {
+    const { familyId } = req.query;
+    if (!familyId) return res.status(400).json({ success: false, error: '缺少 familyId' });
+
+    const family = await Family.findById(familyId);
+    if (!family) return res.status(404).json({ success: false, error: '找不到家庭資料' });
+
+    const grade = family.profile?.grade || '5';
+    const editions = family.profile?.editions || new Map();
+    const progressOffset = family.profile?.progressOffset || new Map();
+
+    const result = [];
+    const keys = editions instanceof Map ? Array.from(editions.keys()) : Object.keys(editions);
+    
+    for (const subject of keys) {
+      const edition = editions instanceof Map ? editions.get(subject) : editions[subject];
+      const offset = (progressOffset instanceof Map ? progressOffset.get(subject) : progressOffset[subject]) || 0;
+      
+      const prediction = getPredictedUnit(grade, subject, edition, offset);
+      result.push({
+        subject,
+        edition,
+        offset,
+        currentWeek: prediction.week,
+        targetWeek: prediction.targetWeek,
+        unit: prediction.unit,
+        isFallback: prediction.isFallback
+      });
+    }
+
+    res.json({ success: true, progressList: result });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// B. 微調進度偏差值
+router.post('/api/progress/adjust', auth, async (req, res) => {
+  try {
+    const { familyId, subject, offset } = req.body;
+    if (!familyId || !subject || typeof offset !== 'number') {
+      return res.status(400).json({ success: false, error: '參數缺失' });
+    }
+
+    const family = await Family.findById(familyId);
+    if (!family) return res.status(404).json({ success: false, error: '找不到家庭資料' });
+
+    if (!family.profile.progressOffset) {
+      family.profile.progressOffset = new Map();
+    }
+    
+    family.profile.progressOffset.set(subject, offset);
+    family.markModified('profile.progressOffset');
+    await family.save();
+
+    const grade = family.profile.grade || '5';
+    const edition = family.profile.editions instanceof Map 
+      ? family.profile.editions.get(subject) 
+      : family.profile.editions[subject] || '康軒版';
+      
+    const prediction = getPredictedUnit(grade, subject, edition, offset);
+
+    res.json({
+      success: true,
+      subject,
+      offset,
+      currentWeek: prediction.week,
+      targetWeek: prediction.targetWeek,
+      unit: prediction.unit
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// C. 家長/教師題目錯誤與超綱回報 API (Feedback Loop)
+router.post('/api/quiz/feedback', auth, async (req, res) => {
+  try {
+    const { familyId, subject, q, opts, a, userAnswer, feedback_type, parent_note } = req.body;
+    if (!familyId || !subject || !q || !feedback_type) {
+      return res.status(400).json({ success: false, error: '缺少必要參數' });
+    }
+
+    const feedback = await QuizFeedback.create({
+      familyId,
+      subject,
+      q,
+      opts: opts || [],
+      a: typeof a === 'number' ? a : null,
+      userAnswer: typeof userAnswer === 'number' ? userAnswer : null,
+      feedback_type,
+      parent_note: parent_note || '',
+      status: 'pending'
+    });
+
+    console.log(`⚑ [QuizFeedback] 收到新題目回報：[${feedback_type}] 科目=${subject}`);
+    res.status(201).json({ success: true, feedback });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+
 
 // 12. 傳送留言
 router.post('/api/messages/send', async (req, res) => {
