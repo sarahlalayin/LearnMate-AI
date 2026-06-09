@@ -178,24 +178,14 @@ router.post('/api/tasks/generate', auth, checkSub, async (req, res) => {
       }
     }
 
-    // Step 1: 先從題庫 DB 隨機抽題
-    const dbQuestions = await Question.find({ subject, grade: cleanGrade });
-    console.log(`📚 [題庫] ${subject} 找到 ${dbQuestions.length} 題`);
-
     let questions = null;
     let fromDB = false;
     let criticPassed = true;
     let criticAttempts = 0;
 
-    if (dbQuestions.length >= count) {
-      const shuffled = [...dbQuestions].sort(() => Math.random() - 0.5);
-      questions = shuffled.slice(0, count).map(q => ({ q: q.q, opts: q.opts, a: q.a, exp: q.exp }));
-      fromDB = true;
-      console.log(`✅ [題庫] 從 DB 隨機抽取 ${count} 題`);
-    } else {
-      // Step 2: 題庫不足，使用多 Agent 協同出題與 Critic Loop 審查機制
-      console.log(`⚠️ [題庫] 題目不足，改用 AI 多 Agent 生成。主題: ${finalTopic}`);
-      
+    // Step 1: 優先採用多 Agent 協同出題與進度對齊
+    console.log(`🤖 [Agent Priority] 啟動多 Agent 協同出題與 Critic Loop 審核。主題: ${finalTopic}`);
+    try {
       // 檢索該學科被家長回報的 Bad Cases 作為避雷針
       const badCases = await QuizFeedback.find({ subject, status: { $ne: 'fixed' } })
         .sort({ createdAt: -1 })
@@ -213,15 +203,33 @@ router.post('/api/tasks/generate', auth, checkSub, async (req, res) => {
       questions = agentResult.questions;
       criticAttempts = agentResult.attempts;
       criticPassed = agentResult.passed;
+    } catch (aiError) {
+      console.error('❌ [Agent Priority] AI 出題過程發生錯誤：', aiError.message);
+    }
 
-      // Step 3: 最終 Fallback
-      if (!questions || !Array.isArray(questions) || questions.length === 0) {
-        questions = Array.from({ length: count }, (_, i) => ({
-          q: `【${subject}】第 ${i + 1} 題（請至後台新增題庫）`,
-          opts: ['選項 A', '選項 B', '選項 C', '選項 D'],
-          a: 0, exp: '請管理員至後台補充題庫。'
-        }));
+    // Step 2: AI 生成失敗，降級（Fallback）到題庫 DB 抽題
+    if (!questions || !Array.isArray(questions) || questions.length === 0) {
+      console.warn(`⚠️ [Fallback] AI 出題未成功，嘗試從本地題庫 DB 抽取題目...`);
+      const dbQuestions = await Question.find({ subject, grade: cleanGrade });
+      console.log(`📚 [題庫] ${subject} 本地找到 ${dbQuestions.length} 題`);
+
+      if (dbQuestions.length >= count) {
+        const shuffled = [...dbQuestions].sort(() => Math.random() - 0.5);
+        questions = shuffled.slice(0, count).map(q => ({ q: q.q, opts: q.opts, a: q.a, exp: q.exp }));
+        fromDB = true;
+        console.log(`✅ [Fallback] 從本地題庫 DB 成功隨機抽取 ${count} 題`);
       }
+    }
+
+    // Step 3: 最終萬用 Fallback（若 DB 也無題目）
+    if (!questions || !Array.isArray(questions) || questions.length === 0) {
+      console.error(`❌ [Critical Fallback] AI 與本地題庫均失效，使用通用備份題目。`);
+      questions = Array.from({ length: count }, (_, i) => ({
+        q: `【${subject}】第 ${i + 1} 題（核心考題準備中）`,
+        opts: ['選項 A', '選項 B', '選項 C', '選項 D'],
+        a: 0, 
+        exp: '請稍後重試，或聯絡管理員至後台新增題庫。'
+      }));
     }
 
     const newTask = await Task.create({
