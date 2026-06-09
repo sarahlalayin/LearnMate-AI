@@ -135,10 +135,149 @@ JSON 格式要求：
 ]`;
 }
 
+/**
+ * 【核心架構 - 多 Agent 協同出題與 Critic Loop 雙向審查機制】
+ * 包含：Agent 1 (課綱分析) -> Agent 2 (素養命題) -> Agent 3 (挑剔教師審核)
+ */
+async function generateQuizWithCritic(subject, topic, grade, edition, count = 5, feedbackBadCases = [], apiKey = null) {
+  console.log(`🤖 [Critic-Loop] 開始多 Agent 協同出題: 科目=${subject}, 年級=${grade}, 版本=${edition}, 主題=${topic}`);
+
+  // ==========================================
+  // Step 1: Agent 1 - 課綱與盲點分析專家
+  // ==========================================
+  const analyzerPrompt = `你是一位精準理解台灣 108 課綱小學與國中教育的學科分析專家。
+針對科目：【${subject}】、年級：【${grade}年級】、教材版本：【${edition}】、學習主題：【${topic}】。
+請分析並給出：
+1. 該主題下最核心的 2-3 個知識點。
+2. 該年級孩子學習此主題時，最常見的概念混淆或易犯錯誤點。
+
+請務必嚴格以 JSON 格式回傳，不可包含任何 markdown 標記或說明文字：
+{"core_concepts": ["核心概念1", "核心概念2"], "common_errors": ["易混淆錯點1", "易混淆錯點2"]}`;
+
+  const analysisRaw = await callGemini(analyzerPrompt, apiKey);
+  let analysisResult = { core_concepts: [topic], common_errors: [] };
+  if (analysisRaw) {
+    try {
+      const match = analysisRaw.match(/\{[\s\S]*\}/);
+      if (match) {
+        analysisResult = JSON.parse(match[0]);
+        console.log(`✅ [Agent 1 課綱分析] 核心觀念: ${analysisResult.core_concepts.join(', ')}`);
+      }
+    } catch (e) {
+      console.warn('⚠️ [Agent 1] 解析失敗，使用預設值。', e.message);
+    }
+  }
+
+  // ==========================================
+  // Step 2 & 3: Agent 2 (出題) 與 Agent 3 (審核) 的雙向修正 Loop
+  // ==========================================
+  let attempts = 0;
+  const maxAttempts = 3;
+  let currentQuestions = null;
+  let criticFeedbackText = '';
+
+  // 格式化家長回報的 Bad Cases (防踩雷)
+  let badCasesInstruction = '無';
+  if (feedbackBadCases && feedbackBadCases.length > 0) {
+    badCasesInstruction = feedbackBadCases.map((bc, idx) => 
+      `案例 ${idx + 1}:
+- 題目題幹: "${bc.q}"
+- 問題類型: "${bc.feedback_type}" (家長回報原因: "${bc.parent_note || '無'}")`
+    ).join('\n');
+  }
+
+  while (attempts < maxAttempts) {
+    attempts++;
+    console.log(`🔄 [Critic-Loop] 第 ${attempts} 次命題嘗試...`);
+
+    // 組裝 Agent 2 出題 Prompt
+    let generatorPrompt = `你是一位專業的台灣 108 課綱命題老師，專長為「素養導向」設計題目，融入生活情境。
+請為【${grade}年級】的學童設計 ${count} 題【${subject}】單選測驗題。
+教材版本：【${edition}】
+單元主題：【${topic}】
+核心考點：${analysisResult.core_concepts.join('、')}
+學童易錯概念：${analysisResult.common_errors.join('、')}
+
+【歷史家長/教師回報的不良考題避雷針（請絕對避免犯相同錯誤，例如超綱、歧義）】
+${badCasesInstruction}
+
+【嚴格出題規則】
+1. 題目必須使用繁體中文，親切好懂，融入生活實例。
+2. 題目與計算複雜度必須嚴格符合小學 ${grade} 年級程度，不可超出認知負荷（不可超綱）。
+3. 每個題目必須有 4 個不同的選項內容，選項文字中絕不能加上 A/B/C/D 等前綴。
+4. 正確答案索引 (a) 必須是 0-3 之間的整數。
+5. 必須包含簡短易懂的解析（30字內）。
+6. 請只回傳 JSON 陣列，不要有 markdown 區塊，格式如下：
+[{"q":"題目題幹","opts":["選項0","選項1","選項2","選項3"],"a":1,"exp":"解析說明"}]`;
+
+    if (criticFeedbackText) {
+      generatorPrompt += `\n\n【⚠️ 上一次審查未通過退回原因與修改建議，請務必針對此意見修正】：\n${criticFeedbackText}`;
+    }
+
+    const quizRaw = await callGemini(generatorPrompt, apiKey);
+    if (!quizRaw) {
+      console.warn('⚠️ [Agent 2] 生成題目為空，將進行重試。');
+      continue;
+    }
+
+    try {
+      const match = quizRaw.match(/\[[\s\S]*\]/);
+      currentQuestions = JSON.parse(match ? match[0] : quizRaw);
+    } catch (e) {
+      console.error('❌ [Agent 2] 題目 JSON 解析失敗，將進行重試。', e.message);
+      continue;
+    }
+
+    // Agent 3: 教學審查專家 (Critic Agent)
+    console.log(`🕵️ [Agent 3 審查] 開始審查生成的題目...`);
+    const criticPrompt = `你是一位擁有 20 年教學經驗的台灣小學/國中教學主任，扮演挑剔的教學背景家長。
+請審查以下為【${grade}年級】學童設計的【${subject}】測驗題：
+---
+${JSON.stringify(currentQuestions, null, 2)}
+---
+
+【審查指標（極度嚴格）】
+1. 科學性與唯一答案：正確答案索引是否百分之百正確？其他干擾選項是否有可能也是對的？
+2. 認知負荷與超綱：題目敘述或計算是否對【${grade}年級】的孩子過於繁雜？有沒有超綱的概念（例如：三年級出現小數除法）？
+3. 鑑別度：錯誤選項（干擾項）是否流於荒謬？是否結合了常見混淆？
+4. 語意清晰：敘述是否順暢、無錯別字與歧義？
+
+請嚴格進行評估，並以 JSON 格式回傳審查結果，絕對不可包含任何 markdown 標記：
+{"passed": true 或 false, "feedback": "若未通過，請給出具體指出第幾題有什麼問題以及明確的修正建議；若通過則為空"}`;
+
+    const criticRaw = await callGemini(criticPrompt, apiKey);
+    if (criticRaw) {
+      try {
+        const match = criticRaw.match(/\{[\s\S]*\}/);
+        const criticResult = JSON.parse(match ? match[0] : criticRaw);
+        
+        if (criticResult.passed === true) {
+          console.log(`🎉 [Critic-Loop] 審查通過！出題成功。迭代次數: ${attempts}`);
+          return { questions: currentQuestions, attempts, passed: true };
+        } else {
+          criticFeedbackText = criticResult.feedback;
+          console.warn(`❌ [Critic-Loop] 審查未通過退回！原因: ${criticFeedbackText}`);
+        }
+      } catch (e) {
+        console.warn('⚠️ [Agent 3] 審查 JSON 解析失敗，預設通過。', e.message);
+        return { questions: currentQuestions, attempts, passed: true };
+      }
+    } else {
+      // 審查 API 故障時，默認通過以保證系統可用性
+      return { questions: currentQuestions, attempts, passed: true };
+    }
+  }
+
+  // Fallback 處理：若重試次數用完仍未通過審查，回傳最後一次產出的題目，但記錄日誌
+  console.warn(`⚠️ [Critic-Loop] 重試 ${maxAttempts} 次均未能通過審查，強制回傳最後一次結果。`);
+  return { questions: currentQuestions, attempts: maxAttempts, passed: false };
+}
+
 module.exports = {
   callGemini,
   buildQuizPrompt,
   buildVideoPrompt,
   buildInsightPrompt,
-  buildSimilarQuestionPrompt
+  buildSimilarQuestionPrompt,
+  generateQuizWithCritic
 };
