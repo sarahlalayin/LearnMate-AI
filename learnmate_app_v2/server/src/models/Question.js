@@ -7,7 +7,12 @@ const questionSchema = new mongoose.Schema({
   q: { type: String, required: true },
   opts: [String],
   a: Number,
-  exp: String
+  exp: String,
+  
+  // 品質監控報錯率用 (Phase E)
+  attemptsCount: { type: Number, default: 0 },
+  reportCount: { type: Number, default: 0 },
+  isBlacklisted: { type: Boolean, default: false }
 }, { timestamps: true });
 questionSchema.index({ subject: 1, grade: 1, edition: 1 });
 module.exports = mongoose.model('Question', questionSchema);

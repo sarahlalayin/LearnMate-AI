@@ -1,7 +1,50 @@
 const mongoose = require('mongoose');
 
 const familySchema = new mongoose.Schema({
-  familyCode: { type: String, required: true, unique: true },
+  // 會員帳號基本資訊
+  email: { type: String, unique: true, sparse: true, trim: true },
+  password: { type: String }, // Bcrypt hash
+  
+  // 第三方登入 SSO 識別碼
+  appleId: { type: String, unique: true, sparse: true },
+  googleId: { type: String, unique: true, sparse: true },
+  
+  // 家長防護欄與 COPPA 驗證
+  parentVerified: { type: Boolean, default: false },
+  parentVerificationCode: { type: String, default: null },
+  parentVerificationExpires: { type: Date, default: null },
+
+  // 訂閱狀態（Phase C 提早部署，防後續遷移）
+  subscription: {
+    plan: { type: String, enum: ['free', 'pro', 'team'], default: 'free' },
+    status: { type: String, enum: ['active', 'expired', 'trial', 'cancelled'], default: 'expired' },
+    trial_ends_at: { type: Date, default: null },
+    current_period_end: { type: Date, default: null },
+    revenuecat_id: { type: String, default: null },
+    platform: { type: String, enum: ['ios', 'android', 'web'], default: 'web' }
+  },
+  
+  // 段考複習模式設定 (Phase D2)
+  examPrep: {
+    examDate: { type: Date, default: null },
+    countdownActive: { type: Boolean, default: false },
+    subjects: [{
+      subjectName: { type: String },
+      range: { type: String, default: '全範圍' }
+    }]
+  },
+
+  // 成長護照所獲得的徽章牆 (Phase D3)
+  badges: [{
+    badgeId: { type: String },         // 'b1' ~ 'b6'
+    name: { type: String },            // 徽章名稱
+    description: { type: String },     // 徽章獲得描述
+    unlockedAt: { type: Date, default: Date.now }
+  }],
+
+  teacherId: { type: mongoose.Schema.Types.ObjectId, ref: 'Teacher', default: null }, // 綁定班級教師 (Phase E)
+
+  familyCode: { type: String, required: false, unique: true, sparse: true }, // 保持相容性，改為非強制
   childName: { type: String, required: true },
   points: { type: Number, default: 0 },
   streak: { type: Number, default: 0 },

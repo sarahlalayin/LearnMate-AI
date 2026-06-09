@@ -100,9 +100,45 @@ function buildInsightPrompt(childName, grade, completionRate, accuracyData, skip
 只回傳週報文字，不要 JSON 也不要標題。`;
 }
 
+function buildSimilarQuestionPrompt(subject, grade, originalQuestion) {
+  return `你是一位精準理解台灣小學 ${grade} 年級 ${subject} 科 108 課綱核心素養的出題大師。
+現在，一位學員在這道題目上答錯了：
+---
+原題目：${originalQuestion.q}
+答案選項：
+[0] ${originalQuestion.opts[0]}
+[1] ${originalQuestion.opts[1]}
+[2] ${originalQuestion.opts[2]}
+[3] ${originalQuestion.opts[3]}
+正確答案索引：${originalQuestion.a} (即選項 "${originalQuestion.opts[originalQuestion.a]}")
+原題目解析：${originalQuestion.exp}
+---
+
+請你分析原題目的「核心考點」與「邏輯概念」，並依據此核心考點，為學員客製化生成 3 道相同知識點、概念高度相似、但「題幹數字、場景、或敘述方式完全不同」的全新素養單選題，供學員進行弱項加強複習。
+
+嚴格規則：
+1. 題目必須符合小學 ${grade} 年級的日常理解語境，繁體中文，生動活潑。
+2. 每道題必須提供 4 個不同的「實際答案選項」，且選項文字不可加上 A/B/C/D 前綴。
+3. 只有 1 個正確答案，正確答案的索引 (a) 必須是 0 到 3 之間的整數。
+4. 必須包含簡短易懂的解析（30字內）。
+5. 必須只回傳 JSON 陣列，絕對不能包含任何 Markdown 語法或說明文字。
+
+JSON 格式要求：
+[
+  {
+    "q": "相似加強題目一題幹...",
+    "opts": ["選項一", "選項二", "選項三", "選項四"],
+    "a": 0,
+    "exp": "解析說明..."
+  },
+  ...
+]`;
+}
+
 module.exports = {
   callGemini,
   buildQuizPrompt,
   buildVideoPrompt,
-  buildInsightPrompt
+  buildInsightPrompt,
+  buildSimilarQuestionPrompt
 };

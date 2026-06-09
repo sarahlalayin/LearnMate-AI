@@ -38,8 +38,17 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(STATIC_DIR, INDEX_FILE));
 });
 
-// API 路由
-app.use(require('./routes/api'));
+// API 路由（安全防護、帳號認證與隱私合規）
+const { apiLimiter } = require('./middleware/rateLimiter');
+app.use('/api', apiLimiter); // 全站 API 限流保護
+
+app.use(require('./routes/auth'));    // 會員與登入 SSO 路由
+app.use(require('./routes/privacy')); // 隱私合規與帳號完全刪除路由
+app.use(require('./routes/habits'));  // 非學業習慣打卡與確認路由
+app.use(require('./routes/errorLog')); // 智能錯題本與 AI 相似加強路由
+app.use(require('./routes/admin'));    // 內部營運控制台 API 路由 (Phase E)
+app.use(require('./routes/school'));   // B2B 學校安親班管理 API 路由 (Phase E)
+app.use(require('./routes/api'));     // 既有 MVP 業務路由
 
 // admin.html 專用路由
 app.get('/admin', (req, res) => {

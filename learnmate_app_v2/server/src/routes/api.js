@@ -18,6 +18,81 @@ const { searchYouTubeVideo } = require('../services/youtubeService');
 
 
 const router = express.Router();
+const auth = require('../middleware/authMiddleware');
+const checkSub = require('../middleware/authSubscription');
+
+// ==========================================
+// 成長護照 6 款核心成就徽章判定解鎖邏輯 (Phase D3)
+// ==========================================
+async function checkAndUnlockBadges(family, task = null) {
+  try {
+    const unlockedBadges = family.badges || [];
+    const currentIds = unlockedBadges.map(b => b.badgeId);
+    let updated = false;
+
+    // 輔助函數：解鎖徽章
+    const unlock = (badgeId, name, description) => {
+      if (!currentIds.includes(badgeId)) {
+        unlockedBadges.push({ badgeId, name, description, unlockedAt: new Date() });
+        currentIds.push(badgeId);
+        updated = true;
+        console.log(`🏆 [Badge Unlocked] 恭喜孩子解鎖徽章：【${name}】！`);
+      }
+    };
+
+    // 1. 🔥 自律小達人 (b1) - 連續自律連勤滿 7 天
+    if (family.streak >= 7) {
+      unlock('b1', '自律小達人 🔥', '連續自律打卡/連勤滿 7 天，大腦習慣形成的里程碑！');
+    }
+
+    // 2. 🎯 滿分特攻隊 (b2) - 隨堂測驗獲得 100% 正確學業回報
+    // (在 /api/tasks/complete 中已直接判定 b2 並加入，此處作為雙重保險)
+
+    // 3. 📚 學海無涯 (b3) - 累計答題次數滿 50 次
+    let totalQuizCount = 0;
+    if (family.subjectQuizCount) {
+      for (const count of family.subjectQuizCount.values()) {
+        totalQuizCount += count;
+      }
+    }
+    if (totalQuizCount >= 50) {
+      unlock('b3', '學海無涯 📚', '累計隨堂答題次數達到 50 關，大腦知識量滿滿！');
+    }
+
+    // 4. ❌ 錯題剋星 (b4) - 完成一次家長指派的 AI 相似題加強任務
+    if (task && task.type === 'extra' && task.topic && (task.topic.includes('相似題') || task.topic.includes('加強'))) {
+      unlock('b4', '錯題剋星 ❌', '成功攻克並完成家長指派的 AI 錯題相似加強題，消滅弱點！');
+    }
+
+    // 5. 🧘 自律大師 (b5) - 習慣打卡（運動、才藝等）累計滿 10 次
+    const habitCount = await mongoose.model('Task').countDocuments({
+      familyId: family._id,
+      item_type: 'habit',
+      status: 'completed'
+    });
+    if (habitCount >= 10) {
+      unlock('b5', '自律大師 🧘', '累計完成自律生活/才藝養成習慣打卡 10 次，自控力之王！');
+    }
+
+    // 6. 👑 Pro 全能王 (b6) - 解鎖 Pro 且解鎖上述至少 3 個徽章
+    const isPro = family.subscription && family.subscription.plan === 'pro' && family.subscription.status === 'active';
+    const otherBadgesCount = currentIds.filter(id => id !== 'b6').length;
+    if (isPro && otherBadgesCount >= 3) {
+      unlock('b6', 'Pro 全能王 👑', '擁有 Pro 高階會員且成功解鎖至少 3 款核心成就徽章，全能戰士！');
+    }
+
+    if (updated) {
+      family.badges = unlockedBadges;
+      family.markModified('badges');
+    }
+    return updated;
+  } catch (err) {
+    console.error('❌ [Badge] 徽章判定出錯：', err);
+    return false;
+  }
+}
+
+// ==========================================
 
 // ==========================================
 // API 路由
@@ -60,9 +135,28 @@ router.get('/api/tasks/:familyId', async (req, res) => {
 });
 
 // 3. AI 考題生成 ★ 核心功能（優先從題庫抽題）
-router.post('/api/tasks/generate', async (req, res) => {
+router.post('/api/tasks/generate', auth, checkSub, async (req, res) => {
   try {
     const { subject, topic, grade, edition, familyId, count = 5 } = req.body;
+
+    // 檢查是否處於段考複習模式 (Phase D2)
+    const family = await Family.findById(familyId);
+    let finalTopic = topic;
+    let examModeActive = false;
+    let examRange = '';
+
+    if (family && family.examPrep && family.examPrep.countdownActive && family.examPrep.examDate) {
+      const daysLeft = Math.ceil((new Date(family.examPrep.examDate).getTime() - Date.now()) / 86400000);
+      if (daysLeft >= 0 && daysLeft <= 14) {
+        const subPrep = family.examPrep.subjects.find(s => s.subjectName === subject);
+        if (subPrep && subPrep.range) {
+          examModeActive = true;
+          examRange = subPrep.range;
+          finalTopic = `${topic} (段考複習加重範圍：${examRange})`;
+          console.log(`🎯 [ExamPrep] 啟動段考複習出題加強！科目【${subject}】加重範圍為：${examRange}`);
+        }
+      }
+    }
 
     // Step 1: 先從題庫 DB 隨機抽題
     const dbQuestions = await Question.find({ subject, grade: grade || '6' });
@@ -77,10 +171,10 @@ router.post('/api/tasks/generate', async (req, res) => {
       fromDB = true;
       console.log(`✅ [題庫] 從 DB 隨機抽取 ${count} 題`);
     } else {
-      // Step 2: 題庫不足，嘗試 Gemini AI
-      console.log(`⚠️ [題庫] 題目不足，改用 AI 生成`);
+      // Step 2: 題庫不足，嘗試 Gemini AI (使用 finalTopic 納入段考複習權重)
+      console.log(`⚠️ [題庫] 題目不足，改用 AI 生成。主題: ${finalTopic}`);
       const syllabus = await Syllabus.findOne({ grade: grade || '6', subject, edition: edition || '通用版' });
-      const prompt = buildQuizPrompt(subject, topic, grade || '6', edition || '通用版', count, syllabus?.content);
+      const prompt = buildQuizPrompt(subject, finalTopic, grade || '6', edition || '通用版', count, syllabus?.content);
       const rawText = await callGemini(prompt);
       if (rawText) {
         try { questions = JSON.parse(rawText); } catch (e) { questions = null; }
@@ -155,6 +249,9 @@ router.post('/api/tasks/approve-extra', async (req, res) => {
       family.streak = (family.lastActiveDate === yesterday) ? (family.streak || 0) + 1 : 1;
       family.lastActiveDate = todayTW;
     }
+    // 呼叫通用徽章檢測 (傳入剛完成的加強/習慣 Task)
+    await checkAndUnlockBadges(family, task);
+
     await family.save();
     if (message) await Message.create({ familyId, text: message, from: 'parent' });
     res.json({ success: true, points: family.points });
@@ -176,7 +273,7 @@ router.post('/api/tasks/reject-extra', async (req, res) => {
 });
 
 // 4. ★ AI 影片推薦（新路由）
-router.post('/api/videos/recommend', async (req, res) => {
+router.post('/api/videos/recommend', auth, checkSub, async (req, res) => {
   try {
     const { familyId, grade, weakSubjects, topics } = req.body;
 
@@ -424,6 +521,22 @@ router.post('/api/tasks/complete', async (req, res) => {
       family.subjectQuizCount.set(subject, cnt + 1);
     }
 
+    // 檢查解鎖滿分特攻隊 (b2)
+    if (correctCount === totalCount && totalCount >= 5) {
+      const unlockedBadges = family.badges || [];
+      const currentIds = unlockedBadges.map(b => b.badgeId);
+      if (!currentIds.includes('b2')) {
+        family.badges.push({
+          badgeId: 'b2',
+          name: '滿分特攻隊 🎯',
+          description: '隨堂測驗獲得 100% 正確答對，實力無懈可擊！',
+          unlockedAt: new Date()
+        });
+      }
+    }
+    // 呼叫通用徽章檢測
+    await checkAndUnlockBadges(family, { item_type: 'academic', totalQuestions: totalCount });
+
     await family.save();
     res.json({ success: true, points: family.points, streak: family.streak });
   } catch (error) {
@@ -629,6 +742,475 @@ router.post('/api/demo/reset', async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ==========================================
+// 模擬付費解鎖 Pro API (Phase C)
+// ==========================================
+router.post('/api/billing/mock-unlock', async (req, res) => {
+  try {
+    const { familyId } = req.body;
+    if (!familyId) {
+      return res.status(400).json({ success: false, error: '缺少 familyId 參數' });
+    }
+
+    const family = await Family.findById(familyId);
+    if (!family) {
+      return res.status(404).json({ success: false, error: '找不到該家庭帳戶' });
+    }
+
+    // 將訂閱狀態設為 active / pro
+    family.subscription = {
+      plan: 'pro',
+      status: 'active',
+      trial_ends_at: new Date(Date.now() + 30 * 86400000), // 30天後
+      current_period_end: new Date(Date.now() + 30 * 86400000),
+      revenuecat_id: 'mock_rc_' + familyId,
+      platform: 'web'
+    };
+
+    await family.save();
+    console.log(`💎 [Billing] 家庭 ${familyId} 模擬解鎖 Pro 成功！`);
+    res.json({ success: true, subscription: family.subscription });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ==========================================
+// 段考複習模式設定 API (Phase D2)
+// ==========================================
+router.post('/api/exam-prep/settings', auth, async (req, res) => {
+  try {
+    const { familyId, examDate, countdownActive, subjects } = req.body;
+    if (!familyId) {
+      return res.status(400).json({ success: false, error: '缺少 familyId 參數' });
+    }
+
+    const family = await Family.findById(familyId);
+    if (!family) {
+      return res.status(404).json({ success: false, error: '找不到該家庭帳戶' });
+    }
+
+    family.examPrep = {
+      examDate: examDate ? new Date(examDate) : null,
+      countdownActive: countdownActive ?? false,
+      subjects: subjects || []
+    };
+
+    await family.save();
+    console.log(`🎯 [ExamPrep] 家庭 ${familyId} 更新段考複習設定成功！`);
+    res.json({ success: true, examPrep: family.examPrep });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.get('/api/exam-prep/:familyId', auth, async (req, res) => {
+  try {
+    const { familyId } = req.params;
+    const family = await Family.findById(familyId);
+    if (!family) {
+      return res.status(404).json({ success: false, error: '找不到該家庭帳戶' });
+    }
+
+    res.json({ success: true, examPrep: family.examPrep || { examDate: null, countdownActive: false, subjects: [] } });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ==========================================
+// 成長護照 PDF 報告匯出 API (Phase D3)
+// ==========================================
+router.get('/api/insights/passport-pdf/:familyId', async (req, res) => {
+  try {
+    const { familyId } = req.params;
+    const family = await Family.findById(familyId);
+    if (!family) {
+      return res.status(404).send('<h1>找不到該家庭帳戶</h1>');
+    }
+
+    // 計算各科總答題量
+    let totalQuizCount = 0;
+    if (family.subjectQuizCount) {
+      for (const count of family.subjectQuizCount.values()) {
+        totalQuizCount += count;
+      }
+    }
+
+    // 取得已解鎖的徽章
+    const unlockedBadges = family.badges || [];
+    const unlockedIds = unlockedBadges.map(b => b.badgeId);
+
+    // 定義 6 款徽章在報告中的視覺定義
+    const ALL_BADGES = [
+      { id: 'b1', name: '自律小達人 🔥', emoji: '🔥', desc: '連續自律打卡/連勤滿 7 天，大腦習慣形成的里程碑！' },
+      { id: 'b2', name: '滿分特攻隊 🎯', emoji: '🎯', desc: '隨堂測驗獲得 100% 正確答對，實力無懈可擊！' },
+      { id: 'b3', name: '學海無涯 📚', emoji: '📚', desc: '累計隨堂答題次數達到 50 關，大腦知識量滿滿！' },
+      { id: 'b4', name: '錯題剋星 ❌', emoji: '❌', desc: '成功攻克並完成家長指派的 AI 錯題相似加強題，消滅弱點！' },
+      { id: 'b5', name: '自律大師 🧘', emoji: '🧘', desc: '累計完成自律生活/才藝養成習慣打卡 10 次，自控力之王！' },
+      { id: 'b6', name: 'Pro 全能王 👑', emoji: '👑', desc: '擁有 Pro 高階會員且成功解鎖至少 3 款核心成就徽章，全能戰士！' }
+    ];
+
+    // 動態渲染 HTML 與精緻 CSS
+    const html = `
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <title>LearnMate AI — ${family.childName} 的成長護照</title>
+  <style>
+    :root {
+      --primary: #8B5CF6;
+      --primary-glow: rgba(139, 92, 246, 0.15);
+      --success: #10B981;
+      --warning: #F59E0B;
+      --critical: #EF4444;
+      --background: #0F172A;
+      --card-bg: #1E293B;
+      --text: #F8FAFC;
+      --text-sec: #94A3B8;
+      --border: #334155;
+    }
+    body {
+      font-family: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: var(--background);
+      color: var(--text);
+      margin: 0;
+      padding: 40px 20px;
+      line-height: 1.6;
+    }
+    .passport-container {
+      max-width: 850px;
+      margin: 0 auto;
+      background: var(--card-bg);
+      border-radius: 24px;
+      border: 1px solid var(--border);
+      padding: 40px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+      position: relative;
+      overflow: hidden;
+    }
+    /* 裝飾背景發光 */
+    .passport-container::before {
+      content: '';
+      position: absolute;
+      top: -150px;
+      right: -150px;
+      width: 300px;
+      height: 300px;
+      background: radial-gradient(circle, var(--primary-glow) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 2px solid var(--border);
+      padding-bottom: 30px;
+      margin-bottom: 30px;
+    }
+    .profile-section {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+    .avatar {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      background: var(--primary);
+      color: #fff;
+      font-size: 32px;
+      font-weight: bold;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 20px var(--primary-glow);
+    }
+    .profile-info h1 {
+      margin: 0;
+      font-size: 28px;
+      font-weight: 800;
+    }
+    .profile-info p {
+      margin: 5px 0 0 0;
+      color: var(--text-sec);
+      font-size: 14px;
+    }
+    .badge-premium {
+      background: #F59E0B22;
+      border: 1px solid var(--warning);
+      color: var(--warning);
+      padding: 4px 10px;
+      border-radius: 8px;
+      font-size: 11px;
+      font-weight: bold;
+    }
+    .print-btn {
+      background: var(--primary);
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 12px;
+      font-weight: bold;
+      font-size: 14px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.3s;
+      box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
+    }
+    .print-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 18px rgba(139, 92, 246, 0.4);
+    }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+      margin-bottom: 35px;
+    }
+    .stat-card {
+      background: rgba(15, 23, 42, 0.4);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 20px;
+      text-align: center;
+    }
+    .stat-card h3 {
+      margin: 0 0 8px 0;
+      color: var(--text-sec);
+      font-size: 14px;
+    }
+    .stat-card p {
+      margin: 0;
+      font-size: 32px;
+      font-weight: 800;
+      color: var(--primary);
+    }
+    .stat-card p.streak-val {
+      color: var(--warning);
+    }
+    .stat-card p.points-val {
+      color: var(--success);
+    }
+    .section-title {
+      font-size: 18px;
+      font-weight: 800;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-left: 4px solid var(--primary);
+      padding-left: 12px;
+    }
+    .badges-container {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 20px;
+      margin-bottom: 35px;
+    }
+    .badge-card {
+      background: rgba(15, 23, 42, 0.3);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 20px;
+      display: flex;
+      gap: 15px;
+      align-items: center;
+      transition: all 0.3s;
+    }
+    .badge-card.unlocked {
+      border-color: var(--primary-glow);
+      background: rgba(139, 92, 246, 0.05);
+      box-shadow: 0 4px 15px rgba(139, 92, 246, 0.05);
+    }
+    .badge-card.locked {
+      opacity: 0.5;
+    }
+    .badge-icon {
+      font-size: 40px;
+      background: rgba(15, 23, 42, 0.5);
+      width: 70px;
+      height: 70px;
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--border);
+    }
+    .badge-card.unlocked .badge-icon {
+      border-color: var(--primary);
+      background: rgba(139, 92, 246, 0.15);
+      animation: pulse 2s infinite;
+    }
+    .badge-details h4 {
+      margin: 0 0 5px 0;
+      font-size: 16px;
+      font-weight: 700;
+    }
+    .badge-card.unlocked .badge-details h4 {
+      color: var(--text);
+    }
+    .badge-details p {
+      margin: 0;
+      font-size: 12px;
+      color: var(--text-sec);
+      line-height: 1.4;
+    }
+    .badge-time {
+      font-size: 10px;
+      color: var(--success);
+      margin-top: 5px;
+      display: block;
+      font-weight: bold;
+    }
+    .ai-evaluation {
+      background: var(--primary-glow);
+      border: 1px dashed var(--primary);
+      border-radius: 20px;
+      padding: 25px;
+      margin-top: 35px;
+    }
+    .ai-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 15px;
+      font-weight: bold;
+      color: var(--primary);
+    }
+    .ai-content {
+      font-size: 14px;
+      color: var(--text);
+      line-height: 1.7;
+    }
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.4); }
+      70% { box-shadow: 0 0 0 10px rgba(139, 92, 246, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0); }
+    }
+    @media print {
+      body {
+        background-color: #fff;
+        color: #000;
+        padding: 0;
+      }
+      .passport-container {
+        border: none;
+        box-shadow: none;
+        background: #fff;
+        padding: 0;
+      }
+      .print-btn {
+        display: none;
+      }
+      .stat-card {
+        border-color: #ddd;
+        background: #f9f9f9;
+      }
+      .badge-card {
+        border-color: #ddd;
+        background: #fcfcfc;
+      }
+      .ai-evaluation {
+        border-color: #ccc;
+        background: #f5f5f5;
+        color: #000;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="passport-container">
+    
+    <div class="header">
+      <div class="profile-section">
+        <div class="avatar">${family.childName[0]}</div>
+        <div class="profile-info">
+          <h1>${family.childName} 的成長護照</h1>
+          <p>
+            年級：國小 ${family.profile?.grade || '6'} 年級 | 
+            <span class="badge-premium">👑 Pro 商用尊榮版</span>
+          </p>
+        </div>
+      </div>
+      <button class="print-btn" onclick="window.print()">
+        🖨️ 匯出 PDF / 列印護照
+      </button>
+    </div>
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <h3>當前自律總金幣</h3>
+        <p class="points-val">💎 ${family.points} 點</p>
+      </div>
+      <div class="stat-card">
+        <h3>最長連續自律連勤</h3>
+        <p class="streak-val">🔥 ${family.streak} 天</p>
+      </div>
+      <div class="stat-card">
+        <h3>累計隨堂答題數</h3>
+        <p>${totalQuizCount} 題</p>
+      </div>
+    </div>
+
+    <div class="section-title">🏆 兒童成長成就徽章牆</div>
+    
+    <div class="badges-container">
+      ${ALL_BADGES.map(badge => {
+        const isUnlocked = unlockedIds.includes(badge.id);
+        const logItem = unlockedBadges.find(b => b.badgeId === badge.id);
+        
+        return `
+          <div class="badge-card ${isUnlocked ? 'unlocked' : 'locked'}">
+            <div class="badge-icon">${badge.emoji}</div>
+            <div class="badge-details">
+              <h4>${badge.name} ${isUnlocked ? '' : '🔒'}</h4>
+              <p>${badge.desc}</p>
+              ${isUnlocked ? `
+                <span class="badge-time">✓ 已解鎖 (${new Date(logItem.unlockedAt).toLocaleDateString('zh-TW')})</span>
+              ` : `
+                <span class="badge-time" style="color:var(--text-sec)">解鎖中...</span>
+              `}
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+
+    <div class="ai-evaluation">
+      <div class="ai-header">
+        🤖 LearnMate AI 成長大數據反思評語
+      </div>
+      <div class="ai-content">
+        親愛的家長與寶貝，根據本學期的自律連勤軌跡與點數增長動態，我們為寶貝送上專屬 AI 反思指引：
+        <br><br>
+        🌟 <b>學習力與自控力優勢：</b> 
+        寶貝目前的最長連勤天數達到了令人讚嘆的 <b>${family.streak} 天</b>！這在心理學上已屬於大腦『自動自律神經網絡』初具規模的卓越表現。不僅如此，寶貝的答題量也成功累積到了 <b>${totalQuizCount} 題</b>，代表其在課堂知識吸收極具熱情與大腦耐力。
+        <br><br>
+        💡 <b>給孩子的溫暖加油：</b>
+        『自律是世界上最強大的超能力！』恭喜你解鎖了 <b>${unlockedIds.length} 個</b> 專屬徽章！每一次答題、每一次習慣計時與打卡，都是你在為更好的自己投票。繼續保持連勤，向更厲害的徽章發起衝鋒吧！
+        <br><br>
+        🌱 <b>家長溫和陪伴指南：</b>
+        建議在家庭餐會中，將這份「成長護照」列印出來貼在冰箱上，作為全家共同的自律勳章。著重稱讚孩子的『大腦耐力與打卡連勤軌跡』，以溫和支持代替焦慮催促，孩子的大腦將會自主釋放多巴胺，使習慣終身受用！
+      </div>
+    </div>
+
+  </div>
+
+</body>
+</html>
+    `;
+
+    res.send(html);
+  } catch (error) {
+    res.status(500).send(`<h1>系統錯誤：${error.message}</h1>`);
   }
 });
 
