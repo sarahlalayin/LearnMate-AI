@@ -73,6 +73,11 @@ const familySchema = new mongoose.Schema({
       type: Map,
       of: String,
       default: { '國語': '南一版', '數學': '康軒版', '社會': '翰林版', '自然': '翰林版', '英語': '康軒版' }
+    },
+    progressOffset: {
+      type: Map,
+      of: Number,
+      default: {}
     }
   },
 
