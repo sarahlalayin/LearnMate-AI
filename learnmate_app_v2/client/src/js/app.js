@@ -565,6 +565,45 @@ JSON 格式範例：
   return shuffled.slice(0, count).map(q => ({ q: q.q, opts: q.opts, a: q.a, exp: q.exp || '太棒了！', aiGenerated: false }));
 }
 
+// --- 依據進度自動帶入單元主題 ---
+async function updateTopicFromProgress(subject) {
+  const familyId = localStorage.getItem('learnmate_family_id');
+  if (!familyId) return;
+
+  const topicInput = document.getElementById('topic-input');
+  if (!topicInput) return;
+
+  const db = getDB();
+  const activityCategories = [...new Set((db.activities || []).map(a => a.category))];
+  if (activityCategories.includes(subject)) {
+    topicInput.value = '';
+    topicInput.placeholder = '請輸入活動任務詳情或留空';
+    return;
+  }
+
+  topicInput.placeholder = '正在預估學校教材單元進度...';
+  topicInput.value = '';
+
+  try {
+    const resp = await apiFetch(`${API_BASE}/api/progress/predict?familyId=${familyId}`);
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data.success && data.progressList) {
+        const p = data.progressList.find(item => item.subject === subject);
+        if (p && p.unit) {
+          topicInput.value = p.unit;
+        } else {
+          topicInput.value = '';
+          topicInput.placeholder = '未找到進度單元，請手動輸入';
+        }
+      }
+    }
+  } catch (e) {
+    console.error('預估單元失敗：', e.message);
+    topicInput.placeholder = '預測失敗，請手動輸入';
+  }
+}
+
 // --- 派題選單動態生成 ---
 function renderParentMsg(db) {
   const select = document.getElementById('topic-subject');
@@ -577,19 +616,25 @@ function renderParentMsg(db) {
     
     select.innerHTML = subs.map(s => `<option value="${s}">${s}</option>`).join('') +
                        activityCategories.map(c => `<option value="${c}">⭐ ${c}</option>`).join('');
-                       
-    select.onchange = (e) => {
-      const isActivity = activityCategories.includes(e.target.value);
+                        
+    select.onchange = async (e) => {
+      const val = e.target.value;
+      const isActivity = activityCategories.includes(val);
       if(btn) btn.textContent = isActivity ? '直接派發任務 →' : '從題庫生成 →';
+      await updateTopicFromProgress(val);
     };
     
-    // Trigger onchange to set initial button state
+    // Trigger onchange to set initial button state & load progress topic
     if(select.value) {
-      const isActivity = activityCategories.includes(select.value);
+      const val = select.value;
+      const isActivity = activityCategories.includes(val);
       if(btn) btn.textContent = isActivity ? '直接派發任務 →' : '從題庫生成 →';
+      updateTopicFromProgress(val);
     }
   }
 }
+
+
 
 let tempTaskId = null;
 let mockGeneratedQuiz = [];
