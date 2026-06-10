@@ -4,6 +4,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
+const jwt = require('jsonwebtoken');
 
 const Family = require('../models/Family');
 const Task = require('../models/Task');
@@ -106,7 +107,14 @@ router.post('/api/auth/login', async (req, res) => {
     const { familyCode } = req.body;
     let family = await Family.findOne({ familyCode });
     if (!family) {
-      family = await Family.create({ familyCode, childName: '小明', points: 320, streak: 5, profile: { grade: '6', editions: { '數學': '康軒版', '國語': '南一版', '英語': '康軒版', '社會': '翰林版', '自然': '翰林版' } } });
+      family = await Family.create({
+        familyCode,
+        childName: '小明',
+        points: 320,
+        streak: 5,
+        profile: { grade: '6', editions: { '數學': '康軒版', '國語': '南一版', '英語': '康軒版', '社會': '翰林版', '自然': '翰林版' } },
+        subscription: { plan: 'pro', status: 'active' } // 新註冊帳戶預設開通 Pro
+      });
       await Task.insertMany([
         { familyId: family._id, subject: '國語', topic: 'L5 詞語複習', type: 'daily', totalQuestions: 5 },
         { familyId: family._id, subject: '數學', topic: '第一~六單元總複習', type: 'daily', totalQuestions: 5 },
@@ -119,8 +127,22 @@ router.post('/api/auth/login', async (req, res) => {
         { familyId: family._id, name: '看卡通一集', cost: 50, proposedBy: 'parent', icon: '📺' },
         { familyId: family._id, name: '週末去公園', cost: 300, proposedBy: 'parent', icon: '⚽' }
       ]);
+    } else {
+      // 確保已存在帳戶的 Pro 權限同樣啟用，以防過期
+      if (!family.subscription || family.subscription.plan !== 'pro' || family.subscription.status !== 'active') {
+        family.subscription = { plan: 'pro', status: 'active' };
+        await family.save();
+      }
     }
-    res.json({ success: true, family });
+
+    // 簽發 JWT Token 以通過 auth 中間件校驗
+    const token = jwt.sign(
+      { id: family._id, email: family.email, plan: family.subscription?.plan || 'pro' },
+      process.env.JWT_SECRET || 'learnmate_secret_jwt_key_2026',
+      { expiresIn: '2h' }
+    );
+
+    res.json({ success: true, family, accessToken: token });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -734,6 +756,16 @@ router.post('/api/tasks/clear-extra', async (req, res) => {
   try {
     const { familyId } = req.body;
     await Task.deleteMany({ familyId, type: 'extra' });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 刪除指定任務
+router.delete('/api/tasks/:taskId', async (req, res) => {
+  try {
+    await Task.findByIdAndDelete(req.params.taskId);
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });

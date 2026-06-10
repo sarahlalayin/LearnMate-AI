@@ -197,7 +197,10 @@
           <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px" id="p-ai-report-tags">
             <!-- Tags generated dynamically -->
           </div>
-          <div onclick="navTo('screen-parent-msg')" style="background:#a8d5b5;border-radius:16px;padding:7px 14px;font-size:11px;font-weight:500;color:#2d4a3e;display:inline-block;cursor:pointer">根據報告出補強題 →</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <div onclick="navTo('screen-parent-msg')" style="background:#a8d5b5;border-radius:16px;padding:7px 14px;font-size:11px;font-weight:500;color:#2d4a3e;display:inline-block;cursor:pointer">根據報告出補強題 →</div>
+            <div onclick="downloadPassportPDF()" style="background:#4b5563;border-radius:16px;padding:7px 14px;font-size:11px;font-weight:500;color:#fff;display:inline-block;cursor:pointer">📥 匯出成長護照 PDF</div>
+          </div>
         </div>
         
         <div class="p-card">
@@ -276,6 +279,14 @@
           </div>
           <div id="habits-list" style="margin-bottom:16px">
             <!-- 習慣列表將由 JS 渲染 -->
+          </div>
+
+          <div style="height:1px;background:#e5e7eb;margin:16px 0"></div>
+          
+          <div style="font-size:13px;font-weight:500;margin-bottom:8px">在校教材進度預估與微調</div>
+          <div style="font-size:11px;color:#4b5563;margin-bottom:8px">系統會自動依據開學日期對齊學校進度。若孩子學校進度偏快或偏慢，您可手動微調偏差週數。</div>
+          <div id="progress-prediction-panel" style="background:#f9fafb;border-radius:8px;padding:10px;border:1px solid #e5e7eb;margin-bottom:12px">
+            <div style="font-size:11px;color:#9ca3af;text-align:center">載入教材進度預估中...</div>
           </div>
 
           <button onclick="saveSettings()" class="p-btn p-btn-dark p-btn-lg" style="margin-top:14px;background:#2d4a3e;color:#a8d5b5">儲存設定</button>
@@ -393,6 +404,7 @@
         </div>
         
         <div id="explain" style="display:none;border-radius:10px;padding:10px 12px;margin-bottom:10px"></div>
+        <button id="feedback-trigger-btn" onclick="reportQuizQuestion()" style="display:none;background:#FFF5F5;border:1px solid #FEB2B2;color:#C53030;border-radius:16px;padding:7px 12px;font-size:10px;font-weight:600;cursor:pointer;margin-bottom:12px;width:100%;text-align:center">⚑ 題目有爭議？（答案錯誤/超綱回報）</button>
         
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px; margin-top: 20px;">
           <div id="pts-label" style="font-size:12px;color:#22c55e;font-weight:500;position:relative">

@@ -1,4 +1,52 @@
 // --- AI 設定 (Gemini 2.0 Flash) ---
+const API_BASE = window.location.origin;
+
+// 輔助函式：自訂 API 呼叫，自動帶上 JWT Token
+async function apiFetch(url, options = {}) {
+  const token = localStorage.getItem('learnmate_token');
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(options.headers || {})
+  };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  
+  const resp = await fetch(url, {
+    ...options,
+    headers
+  });
+  
+  if (resp.status === 401) {
+    console.warn('憑證過期或無效，請重新登入');
+    localStorage.removeItem('learnmate_token');
+    localStorage.removeItem('learnmate_family_id');
+    logout();
+    throw new Error('未授權，已自動登出');
+  }
+  
+  return resp;
+}
+
+// 狀態同步：自後端拉取 MongoDB 的 Family 狀態，更新本地 LocalStorage
+async function syncState() {
+  const familyId = localStorage.getItem('learnmate_family_id');
+  if (!familyId) return;
+  try {
+    const resp = await apiFetch(`${API_BASE}/api/sync/${familyId}`);
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data.success && data.db) {
+        saveDB(data.db);
+        updateScreenData(currentScreen);
+        console.log('🔄 [State Sync] 已從 MongoDB 成功對齊前端 LocalStorage 狀態。');
+      }
+    }
+  } catch (e) {
+    console.error('狀態同步失敗：', e.message);
+  }
+}
+
 // API Key 從 localStorage 動態讀取，支援 Demo 輸入框設定
 // 預設備援 Key：為了安全考量，請勿將明文 API Key 寫死在程式碼中！
 // 如果 localStorage 無設定，系統會要求使用者從 UI 輸入，或直接呼叫後端。
@@ -128,30 +176,66 @@ function updateScreenData(screenId) {
 }
 
 // --- 登入邏輯 ---
-function loginAsParent() {
-  const code = document.getElementById('family-code-input').value;
-  if(code !== familyCode) { alert('家庭代碼錯誤'); return; }
-  const keyInput = document.getElementById('gemini-key-input');
-  if (keyInput && keyInput.value.trim()) setGeminiKey(keyInput.value.trim());
-  currentUser = 'parent';
-  initDB();
-  document.getElementById('screen-login').classList.remove('active');
-  document.getElementById('app-container').style.display = 'block';
-  setTimeout(updateNavPosition, 50);
-  navTo('screen-parent-home');
+async function loginAsParent() {
+  const code = document.getElementById('family-code-input').value.trim();
+  if (!code) { alert('請輸入家庭代碼'); return; }
+  
+  try {
+    const resp = await fetch(`${API_BASE}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ familyCode: code })
+    });
+    const data = await resp.json();
+    if (data.success) {
+      localStorage.setItem('learnmate_token', data.accessToken);
+      localStorage.setItem('learnmate_family_id', data.family._id);
+      currentUser = 'parent';
+      
+      saveDB(data.family);
+      await syncState();
+      
+      document.getElementById('screen-login').classList.remove('active');
+      document.getElementById('app-container').style.display = 'block';
+      setTimeout(updateNavPosition, 50);
+      navTo('screen-parent-home');
+    } else {
+      alert('登入失敗: ' + (data.error || '未知錯誤'));
+    }
+  } catch (e) {
+    alert('無法連接至後端伺服器: ' + e.message);
+  }
 }
 
-function loginAsStudent() {
-  const code = document.getElementById('family-code-input').value;
-  if(code !== familyCode) { alert('家庭代碼錯誤'); return; }
-  const keyInput = document.getElementById('gemini-key-input');
-  if (keyInput && keyInput.value.trim()) setGeminiKey(keyInput.value.trim());
-  currentUser = 'student';
-  initDB();
-  document.getElementById('screen-login').classList.remove('active');
-  document.getElementById('app-container').style.display = 'block';
-  setTimeout(updateNavPosition, 50);
-  navTo('screen-student-home');
+async function loginAsStudent() {
+  const code = document.getElementById('family-code-input').value.trim();
+  if (!code) { alert('請輸入家庭代碼'); return; }
+  
+  try {
+    const resp = await fetch(`${API_BASE}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ familyCode: code })
+    });
+    const data = await resp.json();
+    if (data.success) {
+      localStorage.setItem('learnmate_token', data.accessToken);
+      localStorage.setItem('learnmate_family_id', data.family._id);
+      currentUser = 'student';
+      
+      saveDB(data.family);
+      await syncState();
+      
+      document.getElementById('screen-login').classList.remove('active');
+      document.getElementById('app-container').style.display = 'block';
+      setTimeout(updateNavPosition, 50);
+      navTo('screen-student-home');
+    } else {
+      alert('登入失敗: ' + (data.error || '未知錯誤'));
+    }
+  } catch (e) {
+    alert('無法連接至後端伺服器: ' + e.message);
+  }
 }
 
 function logout() {
@@ -507,7 +591,9 @@ function renderParentMsg(db) {
   }
 }
 
+let tempTaskId = null;
 let mockGeneratedQuiz = [];
+
 async function generateQuiz() {
   const topic = document.getElementById('topic-input').value;
   const subject = document.getElementById('topic-subject').value;
@@ -522,66 +608,98 @@ async function generateQuiz() {
 
   if (isActivity) {
     btn.textContent = '派發中...';
-    // 尋找此分類下的習慣範本 icon，預設用 '⭐'
-    const template = (db.activities || []).find(a => a.category === subject && a.name === topic) || 
-                     (db.activities || []).find(a => a.category === subject) || {};
-    const icon = template.icon || '⭐';
-    const points = template.points || 10;
-    
-    // 派送到學生的任務清單中
-    db.tasks.push({
-      id: 'act_' + Date.now(),
-      subject: subject,
-      topic: topic,
-      status: 'pending',
-      points: points,
-      isHabit: true,
-      icon: icon
-    });
-    saveDB(db);
+    try {
+      const familyId = localStorage.getItem('learnmate_family_id');
+      const resp = await apiFetch(`${API_BASE}/api/tasks/create-activity`, {
+        method: 'POST',
+        body: JSON.stringify({ familyId, subject, topic })
+      });
+      const data = await resp.json();
+      if (data.success) {
+        await syncState();
+        alert('非學科任務已自動派發給學生！');
+        document.getElementById('topic-input').value = '';
+        updateScreenData(currentScreen);
+      } else {
+        alert('派發失敗：' + data.error);
+      }
+    } catch (e) {
+      alert('網路連線失敗：' + e.message);
+    }
     btn.disabled = false;
     btn.textContent = '直接派發任務 →';
-    alert('非學科任務已自動派發給學生！');
-    document.getElementById('topic-input').value = '';
-    updateScreenData(currentScreen);
     return;
   }
 
   btn.textContent = '✨ Gemini AI 生成中...';
 
   try {
-    mockGeneratedQuiz = await fetchAIQuestions(subject, topic, 4);
-    const isAI = mockGeneratedQuiz[0]?.aiGenerated;
+    const familyId = localStorage.getItem('learnmate_family_id');
+    const grade = db.profile?.grade || '5';
+    const edition = db.profile?.editions?.[subject] || '康軒版';
 
-    btn.disabled = false;
-    btn.textContent = isAI ? '重新生成 (Gemini AI) →' : '重新生成 →';
-    document.getElementById('preview-box').style.display = 'block';
-    document.getElementById('published-box').style.display = 'none';
+    const resp = await apiFetch(`${API_BASE}/api/tasks/generate`, {
+      method: 'POST',
+      body: JSON.stringify({
+        subject,
+        topic,
+        grade,
+        edition,
+        familyId,
+        count: 4
+      })
+    });
 
-    const list = document.getElementById('quiz-preview-list');
-    const badge = isAI
-      ? `<span style="background:#e8f5e9;color:#2d4a3e;font-size:9px;font-weight:500;padding:2px 7px;border-radius:8px;margin-left:6px">✨ Gemini AI 生成</span>`
-      : `<span style="background:#f3f4f6;color:#6b7280;font-size:9px;padding:2px 7px;border-radius:8px;margin-left:6px">Mock 模式</span>`;
-    list.innerHTML = `<div style="margin-bottom:8px">${badge}</div>` + mockGeneratedQuiz.map((mq, i) => `
-      <div class="pq"><div class="pq-num">Q${i+1}</div><div class="pq-q">${mq.q}</div>
-        ${mq.opts.map((opt, j) => `<div class="pq-opt ${j===mq.a?'correct-opt':''}">${String.fromCharCode(65+j)}. ${opt} ${j===mq.a?'✓':''}</div>`).join('')}
-        <div style="font-size:10px;color:#888;margin-top:4px;border-top:1px dashed #ddd;padding-top:4px">解析: ${mq.exp}</div>
-      </div>
-    `).join('');
+    const data = await resp.json();
+    if (data.success && data.task) {
+      tempTaskId = data.task._id;
+      mockGeneratedQuiz = data.task.questions;
+
+      const isAI = data.aiGenerated;
+      btn.disabled = false;
+      btn.textContent = isAI ? '重新生成 (Gemini AI) →' : '重新生成 →';
+      document.getElementById('preview-box').style.display = 'block';
+      document.getElementById('published-box').style.display = 'none';
+
+      const list = document.getElementById('quiz-preview-list');
+      const badge = isAI
+        ? `<span style="background:#e8f5e9;color:#2d4a3e;font-size:9px;font-weight:500;padding:2px 7px;border-radius:8px;margin-left:6px">✨ Gemini AI 生成 (經 Critic 審查 ${data.criticAttempts || 1} 次)</span>`
+        : `<span style="background:#f3f4f6;color:#6b7280;font-size:9px;padding:2px 7px;border-radius:8px;margin-left:6px">題庫 DB 模式</span>`;
+      
+      list.innerHTML = `<div style="margin-bottom:8px">${badge}</div>` + mockGeneratedQuiz.map((mq, i) => `
+        <div class="pq"><div class="pq-num">Q${i+1}</div><div class="pq-q">${mq.q}</div>
+          ${mq.opts.map((opt, j) => `<div class="pq-opt ${j===mq.a?'correct-opt':''}">${String.fromCharCode(65+j)}. ${opt} ${j===mq.a?'✓':''}</div>`).join('')}
+          <div style="font-size:10px;color:#888;margin-top:4px;border-top:1px dashed #ddd;padding-top:4px">解析: ${mq.exp || '太棒了！'}</div>
+        </div>
+      `).join('');
+    } else {
+      throw new Error(data.error || '後端生成出錯');
+    }
   } catch (e) {
     btn.disabled = false;
     btn.textContent = '重試生成';
-    alert('生成失敗，請再試一次。');
+    alert('生成失敗，請再試一次。原因：' + e.message);
   }
 }
 
-function hidePreview() { document.getElementById('preview-box').style.display = 'none'; }
-function publishQuiz() {
-  const subject = document.getElementById('topic-subject').value;
-  const topic = document.getElementById('topic-input').value;
-  const db = getDB();
-  db.extraTasks.push({ subject, topic, questions: mockGeneratedQuiz, id: Date.now() });
-  saveDB(db);
+async function hidePreview() {
+  if (tempTaskId) {
+    try {
+      await apiFetch(`${API_BASE}/api/tasks/${tempTaskId}`, {
+        method: 'DELETE'
+      });
+      console.log('🗑️ [Preview Cancel] 已清理臨時任務：', tempTaskId);
+    } catch (e) {
+      console.warn('清理臨時任務失敗：', e.message);
+    }
+    tempTaskId = null;
+  }
+  document.getElementById('preview-box').style.display = 'none';
+}
+
+async function publishQuiz() {
+  tempTaskId = null; // 標記為正式確認
+  await syncState();
   
   document.getElementById('preview-box').style.display = 'none';
   document.getElementById('published-box').style.display = 'block';
@@ -594,8 +712,9 @@ function renderParentSettings(db) {
   document.getElementById('set-grade').value = db.profile.grade;
   ['國語','數學','社會','自然','英語'].forEach(sub => {
     const el = document.getElementById(`set-ed-${sub}`);
-    if(el) el.value = db.profile.editions[sub] || '通用版';
+    if(el) el.value = (db.profile.editions instanceof Map ? db.profile.editions.get(sub) : db.profile.editions[sub]) || '通用版';
   });
+  loadProgressTuningPanel();
 }
 
 function saveSettings() {
@@ -786,56 +905,49 @@ function rejectRedeem(reqId) {
   }
 }
 
-function approveExtra(taskId) {
+async function approveExtra(taskId) {
   const msg = prompt('確認完成！要順便給孩子留言鼓勵嗎？(可留空不填)', '');
-  if (msg === null) return; // 按取消
+  if (msg === null) return;
   
-  const db = getDB();
-  let task = db.tasks.find(t => String(t.id) === String(taskId));
-  let isDaily = true;
-  if (!task) {
-    task = db.extraTasks.find(t => String(t.id) === String(taskId));
-    isDaily = false;
-  }
-  
-  if (task) {
-    task.status = 'completed';
-    db.points += (task.points || (isDaily ? 10 : 15));
-    if (msg.trim() !== '') {
-      db.messages.push(`關於「${task.subject} · ${task.topic}」：${msg}`);
+  try {
+    const familyId = localStorage.getItem('learnmate_family_id');
+    const resp = await apiFetch(`${API_BASE}/api/tasks/approve-extra`, {
+      method: 'POST',
+      body: JSON.stringify({
+        familyId,
+        taskId,
+        message: msg
+      })
+    });
+    if (resp.ok) {
+      await syncState();
+      alert('已確認完成！積分已成功發放給孩子。');
     }
-    // 對於加強練習，完成後從加強清單中移除
-    if (!isDaily) {
-      db.extraTasks = db.extraTasks.filter(t => String(t.id) !== String(taskId));
-    }
-    saveDB(db);
-    alert('已確認！積分已發放給孩子。');
-    renderParentHome(db);
-  } else {
-    alert('找不到該任務');
+  } catch (e) {
+    alert('操作失敗：' + e.message);
   }
 }
 
-function rejectExtra(taskId) {
+async function rejectExtra(taskId) {
   const msg = prompt('請告訴孩子為什麼需要重做？', '請再認真完成一次！');
   if (msg === null) return;
   
-  const db = getDB();
-  let task = db.tasks.find(t => String(t.id) === String(taskId));
-  if (!task) {
-    task = db.extraTasks.find(t => String(t.id) === String(taskId));
-  }
-  
-  if (task) {
-    task.status = 'pending';
-    if (msg.trim() !== '') {
-      db.messages.push(`關於「${task.subject} · ${task.topic}」被退回：${msg}`);
+  try {
+    const familyId = localStorage.getItem('learnmate_family_id');
+    const resp = await apiFetch(`${API_BASE}/api/tasks/reject-extra`, {
+      method: 'POST',
+      body: JSON.stringify({
+        familyId,
+        taskId,
+        message: msg
+      })
+    });
+    if (resp.ok) {
+      await syncState();
+      alert('已退回，孩子會收到通知。');
     }
-    saveDB(db);
-    alert('已退回，孩子會收到通知。');
-    renderParentHome(db);
-  } else {
-    alert('找不到該任務');
+  } catch (e) {
+    alert('操作失敗：' + e.message);
   }
 }
 
@@ -1090,12 +1202,13 @@ const MOCK_QUESTIONS = [
 
 async function startQuiz(taskId, subject) {
   const db = getDB();
-  const task = db.tasks.find(t => String(t.id) === String(taskId) || String(t._id) === String(taskId));
-  const topic = task ? task.topic : subject;
+  const familyId = localStorage.getItem('learnmate_family_id');
+  const grade = db.profile?.grade || '5';
+  const edition = db.profile?.editions?.[subject] || '康軒版';
 
   // 先切換畫面，顯示 loading
   document.getElementById('s-quiz-subject').textContent = subject;
-  activeQuiz = { type: 'daily', id: taskId, questions: [], currentIdx: 0 };
+  activeQuiz = { type: 'daily', id: taskId, questions: [], currentIdx: 0, correctCount: 0 };
   navTo('screen-student-quiz');
 
   // 顯示 loading 狀態
@@ -1103,17 +1216,52 @@ async function startQuiz(taskId, subject) {
   document.getElementById('opts').innerHTML = `
     <div style="text-align:center;padding:20px;color:#9ca3af;font-size:12px">
       <div style="font-size:24px;margin-bottom:8px">🤖</div>
-      Gemini AI 依據你的教材版本生成中...
+      Gemini AI 多 Agent 協同命題與進度偵測中...
     </div>`;
   document.getElementById('qdots').innerHTML = '';
   document.getElementById('explain').style.display = 'none';
   document.getElementById('next-btn').style.display = 'none';
   document.getElementById('pts-label').textContent = '準備中...';
 
-  // 非同步取得 AI 題目
-  const questions = await fetchAIQuestions(subject, topic, 5);
-  activeQuiz.questions = questions;
-  renderQuizQ();
+  try {
+    const resp = await apiFetch(`${API_BASE}/api/tasks/generate`, {
+      method: 'POST',
+      body: JSON.stringify({
+        subject,
+        topic: '', // 留空以觸發後端的教材進度預估與偏差微調
+        grade,
+        edition,
+        familyId,
+        count: 5
+      })
+    });
+    
+    if (!resp.ok) {
+      throw new Error('伺服器出題失敗');
+    }
+    
+    const data = await resp.json();
+    if (data.success && data.task && data.task.questions) {
+      activeQuiz.id = data.task._id;
+      activeQuiz.questions = data.task.questions.map(q => ({
+        q: q.q,
+        opts: q.opts,
+        a: q.a,
+        exp: q.exp || '太棒了！'
+      }));
+      renderQuizQ();
+      
+      // 同步最新狀態
+      await syncState();
+    } else {
+      throw new Error(data.error || '後端回傳格式錯誤');
+    }
+  } catch (e) {
+    console.error('出題失敗，改採 Mock 備用題庫：', e.message);
+    const questions = await fetchAIQuestions(subject, subject, 5);
+    activeQuiz.questions = questions;
+    renderQuizQ();
+  }
 }
 
 function startExtraQuiz(extraId) {
@@ -1148,6 +1296,9 @@ function renderQuizQ() {
   document.getElementById('next-btn').style.display = 'none';
   document.getElementById('pts-label').textContent = '選擇你的答案';
   selectedOption = null;
+  
+  const fbBtn = document.getElementById('feedback-trigger-btn');
+  if (fbBtn) fbBtn.style.display = 'none';
 }
 
 function selectOpt(el, idx) {
@@ -1168,10 +1319,8 @@ function selectOpt(el, idx) {
     exp.style.cssText = 'display:block;border-left:3px solid #22c55e;border-radius:0 8px 8px 0;background:#F0FFF4;padding:9px 11px;margin-bottom:10px';
     exp.innerHTML = `<div style="font-size:11px;font-weight:500;color:#276749;margin-bottom:3px">答對了！</div><div style="font-size:11px;color:#276749;line-height:1.5">${q.exp}</div>`;
     
-    // Add points
-    const db = getDB();
-    db.points += 2;
-    saveDB(db);
+    // 統計答對題數
+    activeQuiz.correctCount = (activeQuiz.correctCount || 0) + 1;
     
     document.getElementById('pts-label').innerHTML = `+2 點 獲得中...<span class="points-float">+2 點！</span>`;
   } else {
@@ -1179,6 +1328,9 @@ function selectOpt(el, idx) {
     exp.innerHTML = `<div style="font-size:11px;font-weight:500;color:#9B2C2C;margin-bottom:3px">沒關係，來看看解釋！</div><div style="font-size:11px;color:#9B2C2C;line-height:1.5">${q.exp}</div>`;
     document.getElementById('pts-label').textContent = '繼續加油！';
   }
+  
+  const fbBtn = document.getElementById('feedback-trigger-btn');
+  if (fbBtn) fbBtn.style.display = 'block';
   
   document.getElementById('next-btn').style.display = 'block';
   if(activeQuiz.currentIdx === activeQuiz.questions.length - 1) {
@@ -1195,33 +1347,45 @@ function nextQ() {
   }
 }
 
-function finishQuiz() {
+async function finishQuiz() {
   const db = getDB();
-  if(activeQuiz.type === 'daily') {
-    const task = db.tasks.find(t => String(t.id) === String(activeQuiz.id) || String(t._id) === String(activeQuiz.id));
-    if(task) { 
-      task.status = 'submitted'; 
-      db.alerts.unshift({
-        id: Date.now(),
-        type: 'positive',
-        title: `✨ 完成測驗送出審核：${task.subject}`,
-        desc: `孩子已完成「${task.topic}」，等待您的確認以發放 10 點獎勵！`
-      });
-    }
-  } else {
-    const task = db.extraTasks.find(t => String(t.id) === String(activeQuiz.id) || String(t._id) === String(activeQuiz.id));
-    if (task) {
-      task.status = 'submitted';
-      db.alerts.unshift({
-        id: Date.now(),
-        type: 'positive',
-        title: `💪 加強練習送出審核：${task.subject}`,
-        desc: `孩子已努力完成您派發的加強練習「${task.topic}」，等待您的確認以發放 15 點額外獎勵！`
-      });
-    }
+  const familyId = localStorage.getItem('learnmate_family_id');
+  const correctCount = activeQuiz.correctCount || 0;
+  const totalCount = activeQuiz.questions.length || 5;
+  const subject = document.getElementById('s-quiz-subject').textContent.replace(' (加強)', '');
+  const earnedPoints = activeQuiz.type === 'daily' ? 10 : 15;
+
+  try {
+    // 1. 調用 complete API：新增答對點數（每題 2 點）、更新學科正確率、連勝 streak，以及判定徽章
+    await apiFetch(`${API_BASE}/api/tasks/complete`, {
+      method: 'POST',
+      body: JSON.stringify({
+        familyId,
+        taskId: activeQuiz.id,
+        pointsToAdd: correctCount * 2,
+        correctCount,
+        totalCount,
+        subject
+      })
+    });
+
+    // 2. 調用 submit API：將任務狀態設為 submitted，供家長審核
+    await apiFetch(`${API_BASE}/api/tasks/submit`, {
+      method: 'POST',
+      body: JSON.stringify({
+        taskId: activeQuiz.id,
+        earnedPoints
+      })
+    });
+
+    // 3. 同步最新狀態
+    await syncState();
+    alert(`測驗完成！您答對了 ${correctCount}/${totalCount} 題，獲得了 ${correctCount * 2} 答題金幣！任務已送交家長審核。`);
+  } catch (e) {
+    console.error('提交測驗失敗：', e.message);
+    alert('網路異常，已將結果暫存於本地。');
   }
-  saveDB(db);
-  alert('測驗完成！獲得大量點數！');
+
   navTo('screen-student-home');
 }
 
@@ -1267,40 +1431,57 @@ function selReason(el, reason) {
   }
 }
 
-function confirmSkip() {
-  const db = getDB();
-  db.points = Math.max(0, db.points - 5);
-  const task = db.tasks.find(t => t.id === skipTaskId);
-  if(task) task.status = 'skipped';
-  
-  if(skipReason === '看不懂') {
-    db.alerts.unshift({ id: Date.now(), type: 'critical', title: `${task.subject} — 需要神隊友救援 🚨`, desc: '孩子誠實地表示這科看不懂，這是一個很棒的自我察覺！建議今晚先給他一個擁抱，再一起看看哪裡卡住了。' });
-  } else if(skipReason === '功課太多') {
-    db.alerts.unshift({ id: Date.now(), type: 'warning', title: `${task.subject} — 功課太多暫停`, desc: `孩子覺得學校功課太多，選擇先讓大腦休息。請給予他的時間管理肯定！` });
-  } else {
-    db.alerts.unshift({ id: Date.now(), type: 'warning', title: `${task.subject} — 暫停`, desc: `孩子因為「${skipReason}」暫停了這科。` });
+async function confirmSkip() {
+  try {
+    const familyId = localStorage.getItem('learnmate_family_id');
+    const resp = await apiFetch(`${API_BASE}/api/tasks/skip`, {
+      method: 'POST',
+      body: JSON.stringify({
+        familyId,
+        taskId: skipTaskId,
+        reason: skipReason
+      })
+    });
+    if (resp.ok) {
+      await syncState();
+      alert('已確認暫停，扣除 5 點，家長將會收到預警通知。');
+    }
+  } catch (e) {
+    console.error('跳過任務失敗：', e.message);
+    alert('操作失敗，請稍後重試。');
   }
-  
-  saveDB(db);
-  alert('已確認暫停。');
   navTo('screen-student-home');
 }
 
-function finishHabit(taskId) {
+async function finishHabit(taskId) {
   const db = getDB();
   const task = db.tasks.find(t => String(t.id) === String(taskId));
   if(task) {
-    task.status = 'completed';
-    db.points += (task.points || 10);
-    db.alerts.unshift({ 
-        id: Date.now(), 
-        type: 'positive', 
-        title: `✨ 習慣打卡審查：${task.topic}`, 
-        desc: `孩子已完成「${task.topic}」並獲得 ${task.points || 10} 點，請核對是否確實完成！` 
-    });
-    saveDB(db);
-    alert(`打卡成功！已送出審查並獲得 ${task.points || 10} 點！`);
-    updateScreenData(currentScreen);
+    try {
+      const familyId = localStorage.getItem('learnmate_family_id');
+      const resp = await apiFetch(`${API_BASE}/api/tasks/complete`, {
+        method: 'POST',
+        body: JSON.stringify({
+          familyId,
+          taskId,
+          pointsToAdd: task.points || 10,
+          correctCount: 0,
+          totalCount: 0,
+          subject: task.subject
+        })
+      });
+      if (resp.ok) {
+        // 完成打卡後，將狀態設為 submitted 送交家長確認
+        await apiFetch(`${API_BASE}/api/tasks/submit`, {
+          method: 'POST',
+          body: JSON.stringify({ taskId, earnedPoints: task.points || 10 })
+        });
+        await syncState();
+        alert(`打卡成功！已送出審查並獲得 ${task.points || 10} 點！`);
+      }
+    } catch (e) {
+      console.error('打卡失敗：', e.message);
+    }
   }
 }
 
@@ -1407,3 +1588,147 @@ function updateNavPosition() {
 
 window.addEventListener('resize', updateNavPosition);
 window.addEventListener('DOMContentLoaded', () => { setTimeout(updateNavPosition, 100); });
+
+// =========================================================
+// ★ 新增功能：題目錯誤/超綱回報、進度微調與成長護照 PDF 匯出
+// =========================================================
+
+// 1. 題目錯誤與超綱回報 (Feedback Loop)
+async function reportQuizQuestion() {
+  if (!activeQuiz || !activeQuiz.questions) return;
+  const q = activeQuiz.questions[activeQuiz.currentIdx];
+  if (!q) return;
+
+  const feedbackType = prompt(
+    "請選擇回報的問題類型：\n1. 答案錯誤 / 解析有誤\n2. 題目超綱（不符合此年級）\n3. 題目語意不清 / 選項有瑕疵\n(請輸入數字 1, 2 或 3)"
+  );
+  if (!feedbackType) return;
+
+  let typeString = "";
+  if (feedbackType === "1") typeString = "答案錯誤";
+  else if (feedbackType === "2") typeString = "超綱";
+  else if (feedbackType === "3") typeString = "語意不清";
+  else {
+    alert("輸入錯誤，回報已取消。");
+    return;
+  }
+
+  const parentNote = prompt("請提供您的具體回報意見（可留空）：");
+  if (parentNote === null) return; // 按取消
+
+  const familyId = localStorage.getItem("learnmate_family_id");
+  const subject = document.getElementById("s-quiz-subject").textContent.replace(" (加強)", "");
+
+  try {
+    const resp = await apiFetch(`${API_BASE}/api/quiz/feedback`, {
+      method: "POST",
+      body: JSON.stringify({
+        familyId,
+        subject,
+        q: q.q,
+        opts: q.opts,
+        a: q.a,
+        userAnswer: selectedOption,
+        feedback_type: typeString,
+        parent_note: parentNote
+      })
+    });
+    const data = await resp.json();
+    if (data.success) {
+      alert("感謝您的回報！此題目已記錄，AI 出題 Agent 下次生成考題時將會自動避開此類錯誤（Bad Cases 避雷針）。");
+    } else {
+      alert("回報失敗：" + data.error);
+    }
+  } catch (e) {
+    console.error("提交題目回報出錯：", e.message);
+    alert("網路錯誤，無法送出回報。");
+  }
+}
+
+// 2. 下載兒童成長護照 PDF
+function downloadPassportPDF() {
+  const familyId = localStorage.getItem("learnmate_family_id");
+  if (!familyId) {
+    alert("請先登入！");
+    return;
+  }
+  const url = `${API_BASE}/api/insights/passport-pdf/${familyId}`;
+  window.open(url, "_blank");
+}
+
+// 3. 載入教材進度預估與微調面板
+async function loadProgressTuningPanel() {
+  const panel = document.getElementById("progress-prediction-panel");
+  if (!panel) return;
+
+  const familyId = localStorage.getItem("learnmate_family_id");
+  if (!familyId) return;
+
+  panel.innerHTML = `<div style="font-size:11px;color:#9ca3af;text-align:center">✨ AI 正在依據週進度庫預估學校單元...</div>`;
+
+  try {
+    const resp = await apiFetch(`${API_BASE}/api/progress/predict?familyId=${familyId}`);
+    const data = await resp.json();
+    if (data.success && data.progressList) {
+      if (data.progressList.length === 0) {
+        panel.innerHTML = `<div style="font-size:11px;color:#9ca3af;text-align:center">目前無課綱設定</div>`;
+        return;
+      }
+
+      panel.innerHTML = data.progressList.map(p => {
+        const offset = p.offset || 0;
+        return `
+          <div style="background:#fff;border-radius:6px;padding:8px;margin-bottom:6px;border:1.5px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between">
+            <div style="flex:1;min-width:0;padding-right:6px">
+              <div style="font-size:12px;font-weight:600;color:#0f0f14;display:flex;align-items:center;gap:4px">
+                <span>${p.subject}</span>
+                <span style="font-size:9px;background:#e2e8f0;color:#4a5568;padding:1px 5px;border-radius:4px">${p.edition}</span>
+              </div>
+              <div style="font-size:10px;color:#6b7280;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+                第 ${p.currentWeek} 週進度：<b>${p.unit}</b>
+              </div>
+              <div style="font-size:9px;color:#9ca3af;margin-top:1px">
+                官方第 ${p.targetWeek} 週 · 微調：${offset >= 0 ? '+' : ''}${offset} 週
+              </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:3px;flex-shrink:0">
+              <button onclick="adjustProgressOffset('${p.subject}', ${offset + 1})" style="background:#2d4a3e;color:#a8d5b5;border:none;border-radius:4px;padding:3px 6px;font-size:9px;cursor:pointer;font-weight:500">快一週 +1</button>
+              <button onclick="adjustProgressOffset('${p.subject}', ${offset - 1})" style="background:#fff;border:1px solid #d1d5db;color:#555;border-radius:4px;padding:2px 6px;font-size:9px;cursor:pointer">慢一週 -1</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    } else {
+      panel.innerHTML = `<div style="font-size:11px;color:#ef4444;text-align:center">無法加載進度預測</div>`;
+    }
+  } catch (e) {
+    console.error("預測進度出錯：", e.message);
+    panel.innerHTML = `<div style="font-size:11px;color:#ef4444;text-align:center">網路連線異常</div>`;
+  }
+}
+
+// 4. 微調偏差週數 API 呼叫
+async function adjustProgressOffset(subject, offset) {
+  const familyId = localStorage.getItem("learnmate_family_id");
+  if (!familyId) return;
+
+  try {
+    const resp = await apiFetch(`${API_BASE}/api/progress/adjust`, {
+      method: "POST",
+      body: JSON.stringify({
+        familyId,
+        subject,
+        offset
+      })
+    });
+    const data = await resp.json();
+    if (data.success) {
+      console.log(`🎯 [Progress Adjusted] ${subject} Offset 調整為 ${offset}`);
+      await syncState();
+    } else {
+      alert("微調失敗：" + data.error);
+    }
+  } catch (e) {
+    alert("微調進度時發生網路錯誤：" + e.message);
+  }
+}
