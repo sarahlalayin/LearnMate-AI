@@ -106,13 +106,18 @@ router.post('/api/auth/login', async (req, res) => {
   try {
     const { familyCode } = req.body;
 
+    // 阻擋已被公開的舊 Demo 帳號
+    if (familyCode && familyCode.trim().toUpperCase() === 'DEMO999') {
+      return res.status(403).json({ success: false, error: '此體驗帳號 (DEMO999) 已停用，請輸入其他代碼登入！' });
+    }
+
     // 0. 離線降級容錯：若資料庫未連線，直接開通離線 Demo 帳戶
     if (mongoose.connection.readyState !== 1) {
       console.warn('⚠️ [Offline Fallback] MongoDB 未連線，已為您自動開通離線體驗帳戶！');
       const mockId = new mongoose.Types.ObjectId();
       const mockFamily = {
         _id: mockId,
-        familyCode: familyCode || 'DEMO999',
+        familyCode: familyCode || 'DEMO777',
         childName: '小明 (離線體驗)',
         points: 320,
         streak: 5,
