@@ -1,6 +1,12 @@
 const Family = require('../models/Family');
+const mongoose = require('mongoose');
 
 module.exports = async function(req, res, next) {
+  // 0. 離線容錯降級：若資料庫未連線，直接放行
+  if (mongoose.connection.readyState !== 1) {
+    return next();
+  }
+
   // 1. 本地開發與零成本測試模擬 (MOCK_SUBSCRIPTION)
   if (process.env.MOCK_SUBSCRIPTION === 'true') {
     console.log('🛡️ [Subscription Bypass] 偵測到 MOCK_SUBSCRIPTION 開啟，已自動解鎖 Pro 專屬功能。');

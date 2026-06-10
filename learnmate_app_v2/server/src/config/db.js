@@ -4,7 +4,13 @@ const Question = require('../models/Question');
 const connectDB = async () => {
   const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/learnmate';
   try {
-    await mongoose.connect(MONGODB_URI);
+    // 關閉指令緩衝，避免資料庫未連線時 API 查詢被無限掛起
+    mongoose.set('bufferCommands', false);
+    
+    // 設定連線超時為 3 秒，防止長時間卡住
+    await mongoose.connect(MONGODB_URI, {
+      serverSelectionTimeoutMS: 3000
+    });
     console.log('✅ MongoDB 資料庫連線成功');
     // 自動初始化題庫
     const count = await Question.countDocuments();

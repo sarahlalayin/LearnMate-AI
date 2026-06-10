@@ -105,6 +105,28 @@ async function checkAndUnlockBadges(family, task = null) {
 router.post('/api/auth/login', async (req, res) => {
   try {
     const { familyCode } = req.body;
+
+    // 0. 離線降級容錯：若資料庫未連線，直接開通離線 Demo 帳戶
+    if (mongoose.connection.readyState !== 1) {
+      console.warn('⚠️ [Offline Fallback] MongoDB 未連線，已為您自動開通離線體驗帳戶！');
+      const mockId = new mongoose.Types.ObjectId();
+      const mockFamily = {
+        _id: mockId,
+        familyCode: familyCode || 'DEMO999',
+        childName: '小明 (離線體驗)',
+        points: 320,
+        streak: 5,
+        profile: { grade: '6', editions: { '數學': '康軒版', '國語': '南一版', '英語': '康軒版', '社會': '翰林版', '自然': '翰林版' } },
+        subscription: { plan: 'pro', status: 'active' }
+      };
+      const token = jwt.sign(
+        { id: mockFamily._id, email: '', plan: 'pro' },
+        process.env.JWT_SECRET || 'learnmate_secret_jwt_key_2026',
+        { expiresIn: '2h' }
+      );
+      return res.json({ success: true, family: mockFamily, accessToken: token, offline: true });
+    }
+
     let family = await Family.findOne({ familyCode });
     if (!family) {
       family = await Family.create({
@@ -162,6 +184,26 @@ router.get('/api/tasks/:familyId', async (req, res) => {
 router.post('/api/tasks/generate', auth, checkSub, async (req, res) => {
   try {
     const { subject, topic, grade, edition, familyId, count = 5 } = req.body;
+
+    // 0. 離線降級容錯：若資料庫未連線，自動產生本機練習題目
+    if (mongoose.connection.readyState !== 1) {
+      console.warn('⚠️ [Offline Fallback] MongoDB 未連線，切換至離線出題模式。');
+      const questions = [
+        { q: '計算 10 + 6 x 2 的值是多少？', opts: ['32', '28', '20', '22'], a: 3, exp: '四則混合運算要先乘除後加減。' },
+        { q: '小明每分鐘走 71 公尺，走了 5 分鐘，共走幾公尺？', opts: ['284', '360', '355', '76'], a: 2, exp: '距離 = 速率 x 時間。' },
+        { q: '一個長方體長 11 公分、寬 5 公分、高 9 公分，體積是多少立方公分？', opts: ['500', '495', '64', '486'], a: 1, exp: '長方體體積 = 長 x 寬 x 高。' },
+        { q: '以 330 為基準量，若比較量是基準量的 40%，比較量是多少？', opts: ['132', '370', '290', '152'], a: 0, exp: '比較量 = 基準量 x 百分率。' },
+        { q: '有 7 件上衣和 4 件褲子，每次各選一件，共有幾種搭配方式？', opts: ['11', '35', '27', '28'], a: 3, exp: '搭配問題可用乘法原理。' }
+      ];
+      const mockTask = {
+        _id: new mongoose.Types.ObjectId(),
+        familyId, type: 'extra', subject, topic: topic || '離線推薦單元',
+        totalQuestions: questions.length,
+        questions,
+        aiGenerated: false
+      };
+      return res.json({ success: true, task: mockTask, offline: true });
+    }
 
     const family = await Family.findById(familyId);
     if (!family) return res.status(404).json({ success: false, error: '找不到家庭帳戶' });
@@ -562,6 +604,19 @@ router.post('/api/profile/update', async (req, res) => {
 router.get('/api/progress/predict', auth, async (req, res) => {
   try {
     const { familyId } = req.query;
+    
+    // 0. 離線降級容錯：若資料庫未連線，直接回傳對照之在校教材週進度
+    if (mongoose.connection.readyState !== 1) {
+      const result = [
+        { subject: '數學', edition: '康軒版', offset: 0, currentWeek: 10, targetWeek: 10, unit: '單元五：圓周率與圓周長' },
+        { subject: '國語', edition: '南一版', offset: 0, currentWeek: 10, targetWeek: 10, unit: '第九課：聲音的聯想' },
+        { subject: '英語', edition: '康軒版', offset: 0, currentWeek: 10, targetWeek: 10, unit: '現在進行式' },
+        { subject: '自然', edition: '翰林版', offset: 0, currentWeek: 10, targetWeek: 10, unit: '單元三：光與熱' },
+        { subject: '社會', edition: '翰林版', offset: 0, currentWeek: 10, targetWeek: 10, unit: '單元二：台灣的史前時代' }
+      ];
+      return res.json({ success: true, progressList: result, offline: true });
+    }
+
     if (!familyId) return res.status(400).json({ success: false, error: '缺少 familyId' });
 
     const family = await Family.findById(familyId);
@@ -600,6 +655,12 @@ router.get('/api/progress/predict', auth, async (req, res) => {
 router.post('/api/progress/adjust', auth, async (req, res) => {
   try {
     const { familyId, subject, offset } = req.body;
+    
+    // 0. 離線容錯降級
+    if (mongoose.connection.readyState !== 1) {
+      return res.json({ success: true, subject, offset, currentWeek: 10, targetWeek: 10, unit: '離線微調單元', offline: true });
+    }
+
     if (!familyId || !subject || typeof offset !== 'number') {
       return res.status(400).json({ success: false, error: '參數缺失' });
     }
@@ -639,6 +700,12 @@ router.post('/api/progress/adjust', auth, async (req, res) => {
 router.post('/api/quiz/feedback', auth, async (req, res) => {
   try {
     const { familyId, subject, q, opts, a, userAnswer, feedback_type, parent_note } = req.body;
+    
+    // 0. 離線降級容錯
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(201).json({ success: true, offline: true });
+    }
+
     if (!familyId || !subject || !q || !feedback_type) {
       return res.status(400).json({ success: false, error: '缺少必要參數' });
     }
@@ -882,6 +949,42 @@ router.delete('/api/admin/activities/:id', async (req, res) => {
 router.get('/api/sync/:familyId', async (req, res) => {
   try {
     const familyId = req.params.familyId;
+    
+    // 0. 離線降級容錯：若資料庫未連線，回傳同步對照的本地預設 DB 資料結構
+    if (mongoose.connection.readyState !== 1) {
+      return res.json({
+        success: true,
+        db: {
+          familyId,
+          childName: '小明 (離線體驗)',
+          profile: { grade: '6', editions: { '數學': '康軒版', '國語': '南一版', '英語': '康軒版', '社會': '翰林版', '自然': '翰林版' } },
+          points: 320,
+          streak: 5,
+          subjectAccuracy: { '數學': 85, '國語': 90, '英語': 70, '自然': 80, '社會': 75 },
+          tasks: [
+            { id: '1', subject: '國語', topic: 'L5 詞語複習', type: 'daily', status: 'pending', points: 10 },
+            { id: '2', subject: '數學', topic: '第一~六單元總複習', type: 'daily', status: 'pending', points: 10 },
+            { id: '3', subject: '英語', topic: '現在進行式', type: 'daily', status: 'pending', points: 10 },
+            { id: '4', subject: '自然', topic: '植物的構造', type: 'daily', status: 'pending', points: 10 },
+            { id: '5', subject: '社會', topic: '台灣地理', type: 'daily', status: 'pending', points: 10 }
+          ],
+          extraTasks: [],
+          submittedCount: 0,
+          rewards: [
+            { id: 1, name: '玩 Switch 30分鐘', cost: 100, icon: '🎮', proposedBy: 'parent', status: 'ready' },
+            { id: 2, name: '看卡通一集', cost: 50, icon: '📺', proposedBy: 'parent', status: 'ready' },
+            { id: 3, name: '週末去公園', cost: 300, icon: '⚽', proposedBy: 'parent', status: 'ready' }
+          ],
+          rewardRequests: [],
+          alerts: [
+            { id: 1, type: 'critical', title: '英語·現在進行式 連續卡住', desc: '可能真的卡住了，不是偷懶。' }
+          ],
+          messages: ['加油喔！寶貝！'],
+          activities: []
+        }
+      });
+    }
+
     const family = await Family.findById(familyId);
     if (!family) return res.status(404).json({ success: false, error: '找不到家庭' });
 
