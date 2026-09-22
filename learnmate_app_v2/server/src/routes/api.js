@@ -205,13 +205,15 @@ router.post('/api/tasks/generate', auth, checkSub, async (req, res) => {
     // 0. 離線降級容錯：若資料庫未連線，自動產生本機練習題目
     if (mongoose.connection.readyState !== 1) {
       console.warn('⚠️ [Offline Fallback] MongoDB 未連線，切換至離線出題模式。');
-      const questions = [
-        { q: '計算 10 + 6 x 2 的值是多少？', opts: ['32', '28', '20', '22'], a: 3, exp: '四則混合運算要先乘除後加減。' },
-        { q: '小明每分鐘走 71 公尺，走了 5 分鐘，共走幾公尺？', opts: ['284', '360', '355', '76'], a: 2, exp: '距離 = 速率 x 時間。' },
-        { q: '一個長方體長 11 公分、寬 5 公分、高 9 公分，體積是多少立方公分？', opts: ['500', '495', '64', '486'], a: 1, exp: '長方體體積 = 長 x 寬 x 高。' },
-        { q: '以 330 為基準量，若比較量是基準量的 40%，比較量是多少？', opts: ['132', '370', '290', '152'], a: 0, exp: '比較量 = 基準量 x 百分率。' },
-        { q: '有 7 件上衣和 4 件褲子，每次各選一件，共有幾種搭配方式？', opts: ['11', '35', '27', '28'], a: 3, exp: '搭配問題可用乘法原理。' }
-      ];
+      const offlineBank = {
+        '國語': [{ q: '「津津有味」最接近哪一個意思？', opts: ['吃得很快', '興味濃厚', '非常口渴', '沒有味道'], a: 1, exp: '津津有味形容興味濃厚。' }],
+        '數學': [{ q: '3/4 + 1/8 等於多少？', opts: ['4/12', '5/8', '7/8', '1'], a: 2, exp: '3/4 等於 6/8，加 1/8 是 7/8。' }],
+        '英語': [{ q: 'Which sentence is correct?', opts: ['She play tennis.', 'She is playing tennis.', 'She playing tennis.', 'She are playing tennis.'], a: 1, exp: '現在進行式使用 is + V-ing。' }],
+        '自然': [{ q: '植物的根主要負責什麼？', opts: ['吸收水分和固定植物', '製造種子', '發出聲音', '捕捉昆蟲'], a: 0, exp: '根能吸收水分並固定植物。' }],
+        '社會': [{ q: '臺灣位於哪一個海洋的西側？', opts: ['大西洋', '太平洋', '印度洋', '北冰洋'], a: 1, exp: '臺灣位於太平洋西側。' }]
+      };
+      const bank = offlineBank[subject] || offlineBank['國語'];
+      const questions = Array.from({ length: count }, (_, index) => ({ ...bank[index % bank.length] }));
       const mockTask = {
         _id: new mongoose.Types.ObjectId(),
         familyId, type: 'extra', subject, topic: topic || '離線推薦單元',
@@ -302,15 +304,48 @@ router.post('/api/tasks/generate', auth, checkSub, async (req, res) => {
       }
     }
 
-    // Step 3: 最終萬用 Fallback（若 DB 也無題目）
+    // Step 3: Subject-specific fallback keeps the demo answerable when AI and MongoDB are unavailable.
     if (!questions || !Array.isArray(questions) || questions.length === 0) {
-      console.error(`❌ [Critical Fallback] AI 與本地題庫均失效，使用通用備份題目。`);
-      questions = Array.from({ length: count }, (_, i) => ({
-        q: `【${subject}】第 ${i + 1} 題（核心考題準備中）`,
-        opts: ['選項 A', '選項 B', '選項 C', '選項 D'],
-        a: 0, 
-        exp: '請稍後重試，或聯絡管理員至後台新增題庫。'
-      }));
+      console.warn(`⚠️ [Subject Fallback] ${subject} 使用內建備援題庫。`);
+      const fallbackBank = {
+        '國語': [
+          { q: '「津津有味」最接近哪一個意思？', opts: ['吃得很快', '興味濃厚', '非常口渴', '沒有味道'], a: 1, exp: '津津有味形容興味濃厚。' },
+          { q: '下列哪一個詞語的意思是「願意接受別人的意見」？', opts: ['虛心', '粗心', '安心', '用心'], a: 0, exp: '虛心表示願意接受意見。' },
+          { q: '「雖然下雨，但是我們仍然準時到校」屬於哪種複句？', opts: ['因果', '條件', '轉折', '假設'], a: 2, exp: '雖然但是表示轉折。' },
+          { q: '「萬紫千紅」最適合形容什麼景象？', opts: ['百花盛開', '大雪紛飛', '夜晚寧靜', '海浪洶湧'], a: 0, exp: '萬紫千紅形容花朵色彩繽紛。' },
+          { q: '下列哪一句使用了譬喻？', opts: ['妹妹正在看書。', '月亮像一艘小船。', '小狗跑得很快。', '今天是星期一。'], a: 1, exp: '像一艘小船是譬喻。' }
+        ],
+        '數學': [
+          { q: '3/4 + 1/8 等於多少？', opts: ['4/12', '5/8', '7/8', '1'], a: 2, exp: '3/4 等於 6/8，加 1/8 是 7/8。' },
+          { q: '一個長方形長 8 公分、寬 5 公分，面積是多少？', opts: ['13平方公分', '26平方公分', '40平方公分', '80平方公分'], a: 2, exp: '長方形面積是長乘寬。' },
+          { q: '0.6 乘以 10 等於多少？', opts: ['0.06', '0.6', '6', '60'], a: 2, exp: '小數乘以 10 小數點向右移一位。' },
+          { q: '2 小時 30 分鐘等於幾分鐘？', opts: ['120', '130', '150', '230'], a: 2, exp: '2 小時是 120 分鐘，再加 30 分鐘。' },
+          { q: '一盒有 24 顆糖，平均分給 6 人，每人幾顆？', opts: ['3', '4', '6', '18'], a: 1, exp: '24 除以 6 等於 4。' }
+        ],
+        '英語': [
+          { q: 'Which sentence is correct?', opts: ['She play tennis.', 'She is playing tennis.', 'She playing tennis.', 'She are playing tennis.'], a: 1, exp: '現在進行式使用 is + V-ing。' },
+          { q: 'Tom ___ breakfast every morning.', opts: ['eat', 'eats', 'eating', 'is eat'], a: 1, exp: 'Tom 是第三人稱單數，動詞加 s。' },
+          { q: 'What is the opposite of "big"?', opts: ['long', 'small', 'fast', 'old'], a: 1, exp: 'big 的相反詞是 small。' },
+          { q: 'There ___ three books on the desk.', opts: ['is', 'am', 'are', 'be'], a: 2, exp: 'three books 是複數，使用 are。' },
+          { q: 'What does "library" mean?', opts: ['餐廳', '圖書館', '醫院', '車站'], a: 1, exp: 'library 是圖書館。' }
+        ],
+        '自然': [
+          { q: '植物的根主要負責什麼？', opts: ['吸收水分和固定植物', '製造種子', '發出聲音', '捕捉昆蟲'], a: 0, exp: '根能吸收水分並固定植物。' },
+          { q: '水在攝氏幾度會結冰？', opts: ['0度', '10度', '50度', '100度'], a: 0, exp: '水在攝氏 0 度結冰。' },
+          { q: '下列哪一項是可再生能源？', opts: ['煤炭', '石油', '太陽能', '天然氣'], a: 2, exp: '太陽能可以持續取得。' },
+          { q: '磁鐵的哪一端會互相排斥？', opts: ['同名磁極', '異名磁極', '沒有磁極', '所有物體'], a: 0, exp: '同名磁極互相排斥。' },
+          { q: '月亮本身會發光嗎？', opts: ['會，自己發光', '不會，反射太陽光', '只在白天發光', '只在雨天發光'], a: 1, exp: '月亮反射太陽光而看起來明亮。' }
+        ],
+        '社會': [
+          { q: '臺灣位於哪一個海洋的西側？', opts: ['大西洋', '太平洋', '印度洋', '北冰洋'], a: 1, exp: '臺灣位於太平洋西側。' },
+          { q: '人民透過投票選出代表，這是什麼制度？', opts: ['民主制度', '世襲制度', '封建制度', '獨裁制度'], a: 0, exp: '投票選代表是民主制度的方式。' },
+          { q: '地圖上的方向通常上方代表哪個方向？', opts: ['東', '南', '西', '北'], a: 3, exp: '一般地圖上方表示北方。' },
+          { q: '愛護公共場所是誰的責任？', opts: ['只有學生', '只有政府', '每一位公民', '只有清潔人員'], a: 2, exp: '公共環境需要大家共同維護。' },
+          { q: '臺灣西部平原較適合發展哪一項產業？', opts: ['農業', '極地探險', '冰山觀光', '火山採礦'], a: 0, exp: '西部平原地勢平坦，適合農業。' }
+        ]
+      };
+      const bank = fallbackBank[subject] || fallbackBank['國語'];
+      questions = Array.from({ length: count }, (_, i) => ({ ...bank[i % bank.length] }));
     }
 
     const newTask = await Task.create({
