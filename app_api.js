@@ -60,7 +60,20 @@ async function syncAndRender() {
     if(data.success) {
       const oldStr = JSON.stringify(globalDB);
       const newStr = JSON.stringify(data.db);
-      globalDB = data.db;
+      const syncedDB = data.db || {};
+      syncedDB.tasks = Array.isArray(syncedDB.tasks) ? syncedDB.tasks : [];
+      syncedDB.extraTasks = Array.isArray(syncedDB.extraTasks) ? syncedDB.extraTasks : [];
+      syncedDB.rewards = Array.isArray(syncedDB.rewards) ? syncedDB.rewards.map(reward => ({
+        ...reward,
+        id: reward.id || reward._id
+      })) : [];
+      syncedDB.rewardRequests = Array.isArray(syncedDB.rewardRequests) ? syncedDB.rewardRequests.map(request => ({
+        ...request,
+        id: request.id || request._id,
+        rewardId: request.rewardId || request.reward_id
+      })) : [];
+      syncedDB.activities = Array.isArray(syncedDB.activities) ? syncedDB.activities : [];
+      globalDB = syncedDB;
       // 只有當資料真正改變，且不在輸入中畫面時，才重新渲染，避免覆蓋使用者的輸入
       if (oldStr !== newStr) {
         if (currentScreen !== 'screen-parent-settings' && currentScreen !== 'screen-student-choose') {
@@ -825,8 +838,10 @@ function renderStudentHome(db) {
 
   document.getElementById('s-streak-days').textContent = db.streak;
 
-  const completed = db.tasks.filter(t => t.status === 'completed').length;
-  const total = db.tasks.length;
+  const activityTasks = (db.extraTasks || []).filter(t => t.isActivity && t.status !== 'completed');
+  const visibleTasks = [...(db.tasks || []), ...activityTasks];
+  const completed = visibleTasks.filter(t => t.status === 'completed').length;
+  const total = visibleTasks.length;
   document.getElementById('s-tasks-completed').textContent = completed;
   document.getElementById('s-tasks-total').textContent = `/${total}`;
   
@@ -851,11 +866,12 @@ function renderStudentHome(db) {
 
   // Tasks
   const taskList = document.getElementById('s-tasks-list');
-  taskList.innerHTML = db.tasks.map(t => {
+  taskList.innerHTML = visibleTasks.map(t => {
     let icon = '📖';
     if(t.subject==='數學') icon='🔢'; else if(t.subject==='社會') icon='🌍'; else if(t.subject==='英語') icon='💬'; else if(t.subject==='自然') icon='🔬';
     
     let edition = db.profile && db.profile.editions ? db.profile.editions[t.subject] || '通用版' : '通用版';
+    if (t.isActivity) edition = '習慣與活動';
 
     if(t.status === 'completed') {
       return `
@@ -897,7 +913,7 @@ function renderStudentHome(db) {
           <div class="subj-icon" style="background:#FEFCBF"><span style="font-size:15px">${icon}</span></div>
           <div style="flex:1"><div class="subj-name">${t.subject}</div><div class="subj-meta">${t.topic} · ${edition}</div></div>
           <div style="display:flex;gap:5px">
-            <div onclick="startQuiz('${t._id || t.id}', '${t.subject}')" class="p-btn p-btn-dark" style="font-size:11px;padding:5px 10px">開始</div>
+            <div onclick="${t.isActivity ? `startExtraQuiz('${t._id || t.id}')` : `startQuiz('${t._id || t.id}', '${t.subject}')`}" class="p-btn p-btn-dark" style="font-size:11px;padding:5px 10px">${t.isActivity ? '打卡' : '開始'}</div>
             <div onclick="prepSkip('${t._id || t.id}', '${t.subject}')" class="p-btn p-btn-ghost" style="font-size:11px;padding:5px 10px">先跳過?</div>
           </div>
         </div>
@@ -908,7 +924,7 @@ function renderStudentHome(db) {
 
 function renderStudentChoose(db) {
   const list = document.getElementById('s-choose-list');
-  const pending = db.tasks.filter(t => t.status === 'pending');
+  const pending = [...(db.tasks || []), ...((db.extraTasks || []).filter(t => t.isActivity && t.status === 'pending'))];
   
   if(pending.length === 0) {
     list.innerHTML = '<div style="text-align:center;padding:20px;color:#9ca3af;font-size:12px;">今天任務已全數完成！🎉</div>';
@@ -920,7 +936,7 @@ function renderStudentChoose(db) {
     if(t.subject==='數學') icon='🔢'; else if(t.subject==='社會') icon='🌍'; else if(t.subject==='英語') icon='💬'; else if(t.subject==='自然') icon='🔬';
     let edition = db.profile && db.profile.editions ? db.profile.editions[t.subject] || '通用版' : '通用版';
     return `
-      <div class="drag-card" onclick="startQuiz('${t._id || t.id}', '${t.subject}')">
+      <div class="drag-card" onclick="${t.isActivity ? `startExtraQuiz('${t._id || t.id}')` : `startQuiz('${t._id || t.id}', '${t.subject}')`}">
         <div style="font-size:15px;color:#d1d5db;padding-right:2px">⋮⋮</div>
         <div class="subj-icon" style="background:#f3f4f6;width:34px;height:34px"><span style="font-size:15px">${icon}</span></div>
         <div style="flex:1"><div style="font-size:13px;font-weight:500;color:#0f0f14">${t.subject} · ${t.topic}</div><div style="font-size:10px;color:#9ca3af">${edition}</div></div>

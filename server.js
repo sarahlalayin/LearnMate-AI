@@ -789,9 +789,9 @@ app.get('/api/sync/:familyId', async (req, res) => {
         tasks: tasks.filter(t => t.type === 'daily'),
         extraTasks: tasks.filter(t => t.type === 'extra' && t.status !== 'completed'),
         submittedCount: tasks.filter(t => t.type === 'extra' && t.status === 'submitted').length,
-        rewards,
+        rewards: rewards.map(reward => ({ ...reward.toObject(), id: reward._id.toString() })),
         rewardRequests: rewards.flatMap(r =>
-          r.requests.map(req => ({ ...req.toObject(), rewardId: r._id, _id: req._id.toString() }))
+          r.requests.map(req => ({ ...req.toObject(), id: req._id.toString(), rewardId: r._id.toString(), _id: req._id.toString() }))
         ),
         alerts,
         messages: messages.map(m => m.text),
