@@ -37,7 +37,7 @@ async function syncState() {
     if (resp.ok) {
       const data = await resp.json();
       if (data.success && data.db) {
-        saveDB(data.db);
+        saveDB(normalizeDB(data.db));
         updateScreenData(currentScreen);
         console.log('🔄 [State Sync] 已從 MongoDB 成功對齊前端 LocalStorage 狀態。');
       }
@@ -146,7 +146,9 @@ function normalizeDB(raw = {}) {
   const base = { ...defaultDB, ...raw };
   base.profile = { ...defaultDB.profile, ...(raw.profile || {}) };
   base.profile.editions = { ...defaultDB.profile.editions, ...(raw.profile?.editions || {}) };
-  base.tasks = Array.isArray(raw.tasks) ? raw.tasks : (Array.isArray(defaultDB.tasks) ? [...defaultDB.tasks] : []);
+  base.tasks = Array.isArray(raw.tasks) && raw.tasks.length > 0
+    ? raw.tasks
+    : (Array.isArray(defaultDB.tasks) ? defaultDB.tasks.map(task => ({ ...task })) : []);
   base.points = Number(raw.points ?? defaultDB.points ?? 0);
   base.streak = Number(raw.streak ?? defaultDB.streak ?? 0);
   base.messages = Array.isArray(raw.messages) ? raw.messages : [];
@@ -829,15 +831,27 @@ function renderParentSettings(db) {
   loadProgressTuningPanel();
 }
 
-function saveSettings() {
+async function saveSettings() {
   const db = getDB();
   db.profile.grade = document.getElementById('set-grade').value;
   ['國語','數學','社會','自然','英語'].forEach(sub => {
     const el = document.getElementById(`set-ed-${sub}`);
     if(el) db.profile.editions[sub] = el.value;
   });
-  saveDB(db);
-  alert('設定已儲存！');
+  saveDB(normalizeDB(db));
+  try {
+    const familyId = localStorage.getItem('learnmate_family_id');
+    const resp = await apiFetch(`${API_BASE}/api/profile/update`, {
+      method: 'POST',
+      body: JSON.stringify({ familyId, grade: db.profile.grade, editions: db.profile.editions })
+    });
+    if (!resp.ok) throw new Error('設定同步失敗');
+    await syncState();
+    alert('設定已儲存，學生端已同步今日任務！');
+  } catch (error) {
+    emitStateRefresh();
+    alert(`設定已儲存在本機，但尚未同步後端：${error.message}`);
+  }
 }
 
 // --- 習慣管理 (Mock) ---

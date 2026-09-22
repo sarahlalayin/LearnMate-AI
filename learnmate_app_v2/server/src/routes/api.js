@@ -160,6 +160,18 @@ router.post('/api/auth/login', async (req, res) => {
         family.subscription = { plan: 'pro', status: 'active' };
         await family.save();
       }
+
+      // Repair older/demo families that were created without daily task records.
+      const existingTaskCount = await Task.countDocuments({ familyId: family._id, type: 'daily' });
+      if (existingTaskCount === 0) {
+        await Task.insertMany([
+          { familyId: family._id, subject: '國語', topic: 'L5 詞語複習', type: 'daily', totalQuestions: 5 },
+          { familyId: family._id, subject: '數學', topic: '第一~六單元總複習', type: 'daily', totalQuestions: 5 },
+          { familyId: family._id, subject: '英語', topic: '現在進行式', type: 'daily', totalQuestions: 5 },
+          { familyId: family._id, subject: '自然', topic: '植物的構造', type: 'daily', totalQuestions: 5 },
+          { familyId: family._id, subject: '社會', topic: '台灣地理', type: 'daily', totalQuestions: 5 }
+        ]);
+      }
     }
 
     // 簽發 JWT Token 以通過 auth 中間件校驗
