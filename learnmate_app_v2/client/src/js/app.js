@@ -37,7 +37,14 @@ async function syncState() {
     if (resp.ok) {
       const data = await resp.json();
       if (data.success && data.db) {
-        saveDB(normalizeDB(data.db));
+          const syncedDB = normalizeDB(data.db);
+          if (data.offline) {
+            const localDB = normalizeDB(getDB());
+            syncedDB.messages = [...new Set([...(syncedDB.messages || []), ...(localDB.messages || [])])];
+            const syncedRewardIds = new Set((syncedDB.rewards || []).map(reward => String(reward.id)));
+            syncedDB.rewards = [...(syncedDB.rewards || []), ...(localDB.rewards || []).filter(reward => !syncedRewardIds.has(String(reward.id)))];
+          }
+          saveDB(syncedDB);
         updateScreenData(currentScreen);
         console.log('🔄 [State Sync] 已從 MongoDB 成功對齊前端 LocalStorage 狀態。');
       }
@@ -155,7 +162,10 @@ function normalizeDB(raw = {}) {
   base.alerts = Array.isArray(raw.alerts) ? raw.alerts : [];
   base.extraTasks = Array.isArray(raw.extraTasks) ? raw.extraTasks : [];
   base.activities = Array.isArray(raw.activities) ? raw.activities : [];
-  base.rewards = Array.isArray(raw.rewards) ? raw.rewards : defaultDB.rewards;
+  base.rewards = (Array.isArray(raw.rewards) ? raw.rewards : defaultDB.rewards).map(reward => ({
+    ...reward,
+    id: reward.id || reward._id || Date.now()
+  }));
   base.rewardRequests = Array.isArray(raw.rewardRequests) ? raw.rewardRequests : [];
   base.subjectAccuracy = raw.subjectAccuracy || {};
   return base;
@@ -539,12 +549,23 @@ async function loadAIWeeklyReport(db, completionRate, fallbackText) {
 }
 
 function fillMsg(text) { document.getElementById('msg-input').value = text; }
-function sendMsg() {
+async function sendMsg() {
   const text = document.getElementById('msg-input').value;
   if(!text.trim()) return;
   const db = getDB();
   db.messages.push(text);
   saveDB(db);
+  try {
+    const familyId = localStorage.getItem('learnmate_family_id');
+    const resp = await apiFetch(`${API_BASE}/api/messages/send`, {
+      method: 'POST',
+      body: JSON.stringify({ familyId, text })
+    });
+    if (!resp.ok) throw new Error('留言同步失敗');
+    await syncState();
+  } catch (error) {
+    console.warn('留言已暫存本機，後端同步失敗：', error.message);
+  }
   document.getElementById('msg-input').value = '';
   const sent = document.getElementById('msg-sent');
   sent.style.display = 'block';
@@ -1323,14 +1344,26 @@ function claimReward(id) {
   }
 }
 
-function proposeReward() {
+async function proposeReward() {
   const name = prompt('你想新增什麼獎勵？');
   if(!name) return;
   const icon = prompt('選一個表情符號代表它？', '🎁') || '🎁';
   const db = getDB();
-  db.rewards.push({ id: Date.now(), name, icon, cost: 0, proposedBy: 'student', status: 'proposed' });
+  const localReward = { id: Date.now(), name, icon, cost: 0, proposedBy: 'student', status: 'proposed' };
+  db.rewards.push(localReward);
   db.alerts.unshift({ id: Date.now(), type: 'positive', title: `✨ 新獎勵許願：${name}`, desc: `孩子提議將「${icon} ${name}」加入獎勵清單，前往設定這需要多少點數吧！` });
   saveDB(db);
+  try {
+    const familyId = localStorage.getItem('learnmate_family_id');
+    const resp = await apiFetch(`${API_BASE}/api/rewards/propose`, {
+      method: 'POST',
+      body: JSON.stringify({ familyId, name, icon })
+    });
+    if (!resp.ok) throw new Error('獎勵提議同步失敗');
+    await syncState();
+  } catch (error) {
+    console.warn('獎勵提議已暫存本機，後端同步失敗：', error.message);
+  }
   alert('提議已送出！等待爸媽同意並設定點數。');
 }
 

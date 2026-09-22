@@ -549,6 +549,13 @@ router.get('/api/rewards/:familyId', async (req, res) => {
 router.post('/api/rewards/propose', async (req, res) => {
   try {
     const { familyId, name, icon } = req.body;
+    if (mongoose.connection.readyState !== 1) {
+      return res.json({
+        success: true,
+        offline: true,
+        reward: { id: `offline-${Date.now()}`, familyId, name, icon: icon || '🎁', cost: 0, proposedBy: 'student', status: 'proposed' }
+      });
+    }
     const newReward = await Reward.create({ familyId, name, icon, cost: 0, proposedBy: 'student', status: 'proposed' });
     res.json({ success: true, reward: newReward });
   } catch (error) {
@@ -794,6 +801,9 @@ router.post('/api/quiz/feedback', auth, async (req, res) => {
 router.post('/api/messages/send', async (req, res) => {
   try {
     const { familyId, text } = req.body;
+    if (mongoose.connection.readyState !== 1) {
+      return res.json({ success: true, offline: true, message: { familyId, text, from: 'parent' } });
+    }
     await Message.create({ familyId, text, from: 'parent' });
     res.json({ success: true });
   } catch (error) {
@@ -1021,6 +1031,7 @@ router.get('/api/sync/:familyId', async (req, res) => {
     if (mongoose.connection.readyState !== 1) {
       return res.json({
         success: true,
+        offline: true,
         db: {
           familyId,
           childName: '小明 (離線體驗)',
@@ -1072,7 +1083,7 @@ router.get('/api/sync/:familyId', async (req, res) => {
         tasks: tasks.filter(t => t.type === 'daily'),
         extraTasks: tasks.filter(t => t.type === 'extra' && t.status !== 'completed'),
         submittedCount: tasks.filter(t => t.type === 'extra' && t.status === 'submitted').length,
-        rewards,
+        rewards: rewards.map(reward => ({ ...reward.toObject(), id: reward._id.toString() })),
         rewardRequests: rewards.flatMap(r =>
           r.requests.map(req => ({ ...req.toObject(), rewardId: r._id, _id: req._id.toString() }))
         ),
