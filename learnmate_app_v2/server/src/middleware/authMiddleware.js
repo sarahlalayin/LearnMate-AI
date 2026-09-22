@@ -19,8 +19,13 @@ module.exports = function(req, res, next) {
     // 驗證 Token（使用環境變數中的 JWT_SECRET）
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'learnmate_secret_jwt_key_2026');
     
-    // 將解碼後的資料注入 req.family (包含 familyId, email 等)
-    req.family = decoded;
+    // Login tokens historically used `id`, while downstream middleware expects `familyId`.
+    // Normalize once here so every protected route receives the same identity shape.
+    const familyId = decoded.familyId || decoded.id;
+    if (!familyId) {
+      return res.status(401).json({ success: false, error: '登入憑證缺少家庭識別碼，請重新登入。' });
+    }
+    req.family = { ...decoded, id: familyId, familyId };
     next();
   } catch (error) {
     if (error.name === 'TokenExpiredError') {

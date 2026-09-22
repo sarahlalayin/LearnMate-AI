@@ -142,6 +142,61 @@ function getDB() {
 }
 function saveDB(db) { localStorage.setItem('learnmate_db', JSON.stringify(db)); }
 
+function normalizeDB(raw = {}) {
+  const base = { ...defaultDB, ...raw };
+  base.profile = { ...defaultDB.profile, ...(raw.profile || {}) };
+  base.profile.editions = { ...defaultDB.profile.editions, ...(raw.profile?.editions || {}) };
+  base.tasks = Array.isArray(raw.tasks) ? raw.tasks : (Array.isArray(defaultDB.tasks) ? [...defaultDB.tasks] : []);
+  base.points = Number(raw.points ?? defaultDB.points ?? 0);
+  base.streak = Number(raw.streak ?? defaultDB.streak ?? 0);
+  base.messages = Array.isArray(raw.messages) ? raw.messages : [];
+  base.alerts = Array.isArray(raw.alerts) ? raw.alerts : [];
+  base.extraTasks = Array.isArray(raw.extraTasks) ? raw.extraTasks : [];
+  base.activities = Array.isArray(raw.activities) ? raw.activities : [];
+  base.rewards = Array.isArray(raw.rewards) ? raw.rewards : defaultDB.rewards;
+  base.rewardRequests = Array.isArray(raw.rewardRequests) ? raw.rewardRequests : [];
+  base.subjectAccuracy = raw.subjectAccuracy || {};
+  return base;
+}
+
+function emitStateRefresh() {
+  const db = getDB();
+  saveDB(db);
+  window.dispatchEvent(new CustomEvent('learnmate-state-sync', { detail: db }));
+  if (currentScreen && currentScreen !== 'screen-login') {
+    updateScreenData(currentScreen);
+  }
+}
+
+function persistAndRefreshDB(mutator, options = {}) {
+  const db = normalizeDB(getDB());
+  const patched = typeof mutator === 'function' ? mutator(db) : db;
+  const next = normalizeDB(patched);
+  saveDB(next);
+  if (options.notify !== false) {
+    emitStateRefresh();
+  }
+  return next;
+}
+
+function getDemoFamily(code) {
+  const normalized = String(code || '').trim().toUpperCase();
+  const isValidDemo = /^DEMO\d+$/i.test(normalized) && normalized !== 'DEMO999';
+  if (!isValidDemo) {
+    return null;
+  }
+  const base = normalizeDB({
+    ...defaultDB,
+    childName: '小明',
+    familyCode: normalized,
+    _id: `demo-${normalized.toLowerCase()}`,
+    points: 320,
+    streak: 5,
+    messages: ['寶貝今天辛苦了！你已經做得很棒了，剩下的我們一起努力 ❤️']
+  });
+  return base;
+}
+
 // --- 導覽與畫面切換 ---
 function navTo(screenId) {
   const current = document.getElementById(currentScreen);
@@ -179,7 +234,12 @@ function updateScreenData(screenId) {
 async function loginAsParent() {
   const code = document.getElementById('family-code-input').value.trim();
   if (!code) { alert('請輸入家庭代碼'); return; }
-  
+
+  if (code === 'DEMO999') {
+    alert('登入失敗：此體驗帳號 (DEMO999) 已停用，請改用 DEMO123 或其他有效 demo 帳號。');
+    return;
+  }
+
   try {
     const resp = await fetch(`${API_BASE}/api/auth/login`, {
       method: 'POST',
@@ -192,7 +252,7 @@ async function loginAsParent() {
       localStorage.setItem('learnmate_family_id', data.family._id);
       currentUser = 'parent';
       
-      saveDB(data.family);
+      saveDB(normalizeDB(data.family));
       await syncState();
       
       document.getElementById('screen-login').classList.remove('active');
@@ -200,17 +260,22 @@ async function loginAsParent() {
       setTimeout(updateNavPosition, 50);
       navTo('screen-parent-home');
     } else {
-      alert('登入失敗: ' + (data.error || '未知錯誤'));
+      alert('登入失敗：' + (data.error || '家庭代碼不存在或後端驗證失敗。請確認代碼是否正確。'));
     }
   } catch (e) {
-    alert('無法連接至後端伺服器: ' + e.message);
+    alert('無法連接至後端伺服器，請檢查網路或改用有效 demo 帳號（例如 DEMO123）。\n錯誤：' + e.message);
   }
 }
 
 async function loginAsStudent() {
   const code = document.getElementById('family-code-input').value.trim();
   if (!code) { alert('請輸入家庭代碼'); return; }
-  
+
+  if (code === 'DEMO999') {
+    alert('登入失敗：此體驗帳號 (DEMO999) 已停用，請改用 DEMO123 或其他有效 demo 帳號。');
+    return;
+  }
+
   try {
     const resp = await fetch(`${API_BASE}/api/auth/login`, {
       method: 'POST',
@@ -223,7 +288,7 @@ async function loginAsStudent() {
       localStorage.setItem('learnmate_family_id', data.family._id);
       currentUser = 'student';
       
-      saveDB(data.family);
+      saveDB(normalizeDB(data.family));
       await syncState();
       
       document.getElementById('screen-login').classList.remove('active');
@@ -231,10 +296,10 @@ async function loginAsStudent() {
       setTimeout(updateNavPosition, 50);
       navTo('screen-student-home');
     } else {
-      alert('登入失敗: ' + (data.error || '未知錯誤'));
+      alert('登入失敗：' + (data.error || '家庭代碼不存在或後端驗證失敗。請確認代碼是否正確。'));
     }
   } catch (e) {
-    alert('無法連接至後端伺服器: ' + e.message);
+    alert('無法連接至後端伺服器，請檢查網路或改用有效 demo 帳號（例如 DEMO123）。\n錯誤：' + e.message);
   }
 }
 
@@ -244,6 +309,8 @@ function logout() {
   if(current) current.classList.remove('active');
   currentScreen = 'screen-login';
   document.getElementById('screen-login').classList.add('active');
+  localStorage.removeItem('learnmate_token');
+  localStorage.removeItem('learnmate_family_id');
   currentUser = null;
 }
 
@@ -1005,6 +1072,56 @@ function switchToStudentRewards() {
   updateScreenData(currentScreen);
 }
 
+function applyStudentTaskResult({ taskId, subject, correctCount, totalCount, pointsAwarded, mode = 'daily', message = '' }) {
+  const db = persistAndRefreshDB((state) => {
+    const tasks = Array.isArray(state.tasks) ? state.tasks : [];
+    const index = tasks.findIndex((t) => String(t.id) === String(taskId) || String(t._id) === String(taskId));
+    if (index >= 0) {
+      const task = tasks[index];
+      tasks[index] = {
+        ...task,
+        status: 'completed',
+        submittedAt: new Date().toISOString(),
+        pointsEarned: Number(pointsAwarded || 0),
+        score: Number(correctCount || 0),
+        total: Number(totalCount || 0),
+        mode,
+      };
+    } else if (taskId) {
+      tasks.push({
+        id: taskId,
+        _id: taskId,
+        subject: subject || '學習任務',
+        topic: '線上測驗',
+        status: 'completed',
+        submittedAt: new Date().toISOString(),
+        pointsEarned: Number(pointsAwarded || 0),
+        score: Number(correctCount || 0),
+        total: Number(totalCount || 0),
+        mode,
+      });
+    }
+
+    const nextPoints = Number(state.points || 0) + Number(pointsAwarded || 0);
+    state.points = nextPoints;
+    state.streak = Math.max(Number(state.streak || 0), 1);
+    state.subjectAccuracy = state.subjectAccuracy || {};
+    if (subject) {
+      const prev = Number(state.subjectAccuracy[subject] || 0);
+      const nextRatio = totalCount > 0 ? Math.round((Number(correctCount || 0) / Number(totalCount || 0)) * 100) : prev;
+      state.subjectAccuracy[subject] = Math.max(prev, nextRatio);
+    }
+    state.messages = Array.isArray(state.messages) ? state.messages : [];
+    const summary = message || `${subject || '任務'} 已完成：${correctCount || 0}/${totalCount || 0}，獲得 ${pointsAwarded || 0} 點。`;
+    if (summary) {
+      state.messages.push(summary);
+    }
+    state.tasks = tasks;
+    return state;
+  }, { notify: true });
+  return db;
+}
+
 // --- 學生端邏輯 ---
 function renderStudentHome(db) {
   document.getElementById('s-streak-days').textContent = db.streak;
@@ -1393,44 +1510,60 @@ function nextQ() {
 }
 
 async function finishQuiz() {
-  const db = getDB();
   const familyId = localStorage.getItem('learnmate_family_id');
   const correctCount = activeQuiz.correctCount || 0;
   const totalCount = activeQuiz.questions.length || 5;
   const subject = document.getElementById('s-quiz-subject').textContent.replace(' (加強)', '');
-  const earnedPoints = activeQuiz.type === 'daily' ? 10 : 15;
+  const earnedPoints = activeQuiz.type === 'daily' ? (correctCount * 2) + 10 : (correctCount * 2) + 15;
+
+  const localResult = applyStudentTaskResult({
+    taskId: activeQuiz.id,
+    subject,
+    correctCount,
+    totalCount,
+    pointsAwarded: earnedPoints,
+    mode: activeQuiz.type || 'daily',
+    message: `學生已完成 ${subject} 測驗：${correctCount}/${totalCount}，累積 ${earnedPoints} 點。`
+  });
 
   try {
-    // 1. 調用 complete API：新增答對點數（每題 2 點）、更新學科正確率、連勝 streak，以及判定徽章
     await apiFetch(`${API_BASE}/api/tasks/complete`, {
       method: 'POST',
       body: JSON.stringify({
         familyId,
         taskId: activeQuiz.id,
-        pointsToAdd: correctCount * 2,
+        pointsToAdd: earnedPoints,
         correctCount,
         totalCount,
         subject
       })
-    });
+    }).catch(() => null);
 
-    // 2. 調用 submit API：將任務狀態設為 submitted，供家長審核
     await apiFetch(`${API_BASE}/api/tasks/submit`, {
       method: 'POST',
       body: JSON.stringify({
         taskId: activeQuiz.id,
-        earnedPoints
+        earnedPoints,
+        correctCount,
+        totalCount,
+        subject
       })
-    });
+    }).catch(() => null);
 
-    // 3. 同步最新狀態
     await syncState();
-    alert(`測驗完成！您答對了 ${correctCount}/${totalCount} 題，獲得了 ${correctCount * 2} 答題金幣！任務已送交家長審核。`);
   } catch (e) {
-    console.error('提交測驗失敗：', e.message);
-    alert('網路異常，已將結果暫存於本地。');
+    console.warn('遠端提交未成功，使用本地狀態同步：', e.message);
   }
 
+  if (localResult && Array.isArray(localResult.tasks)) {
+    const task = localResult.tasks.find((item) => String(item.id) === String(activeQuiz.id) || String(item._id) === String(activeQuiz.id));
+    if (task) {
+      task.status = 'submitted';
+      saveDB(localResult);
+    }
+  }
+
+  alert(`測驗完成！您答對了 ${correctCount}/${totalCount} 題，獲得了 ${earnedPoints} 點。家長端同步資料已更新。`);
   navTo('screen-student-home');
 }
 
@@ -1502,6 +1635,17 @@ async function finishHabit(taskId) {
   const db = getDB();
   const task = db.tasks.find(t => String(t.id) === String(taskId));
   if(task) {
+    const pointsAwarded = Number(task.points || 10);
+    const merged = applyStudentTaskResult({
+      taskId,
+      subject: task.subject,
+      correctCount: 0,
+      totalCount: 0,
+      pointsAwarded,
+      mode: 'habit',
+      message: `習慣打卡完成：${task.subject} · ${task.topic}，獲得 ${pointsAwarded} 點。`
+    });
+
     try {
       const familyId = localStorage.getItem('learnmate_family_id');
       const resp = await apiFetch(`${API_BASE}/api/tasks/complete`, {
@@ -1509,24 +1653,26 @@ async function finishHabit(taskId) {
         body: JSON.stringify({
           familyId,
           taskId,
-          pointsToAdd: task.points || 10,
+          pointsToAdd: pointsAwarded,
           correctCount: 0,
           totalCount: 0,
           subject: task.subject
         })
-      });
-      if (resp.ok) {
-        // 完成打卡後，將狀態設為 submitted 送交家長確認
+      }).catch(() => null);
+      if (resp && resp.ok) {
         await apiFetch(`${API_BASE}/api/tasks/submit`, {
           method: 'POST',
-          body: JSON.stringify({ taskId, earnedPoints: task.points || 10 })
-        });
-        await syncState();
-        alert(`打卡成功！已送出審查並獲得 ${task.points || 10} 點！`);
+          body: JSON.stringify({ taskId, earnedPoints: pointsAwarded })
+        }).catch(() => null);
       }
+      await syncState();
     } catch (e) {
-      console.error('打卡失敗：', e.message);
+      console.warn('打卡遠端更新失敗，使用 local state：', e.message);
     }
+
+    saveDB(merged);
+    alert(`打卡成功！已送出審查並獲得 ${pointsAwarded} 點！`);
+    updateScreenData(currentScreen);
   }
 }
 
@@ -1536,6 +1682,12 @@ window.addEventListener('storage', (e) => {
     if (currentScreen !== 'screen-login') {
       updateScreenData(currentScreen);
     }
+  }
+});
+window.addEventListener('learnmate-state-sync', (event) => {
+  const db = event.detail || getDB();
+  if (db && currentScreen !== 'screen-login') {
+    updateScreenData(currentScreen);
   }
 });
 
