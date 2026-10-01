@@ -40,9 +40,11 @@ async function syncState() {
           const syncedDB = normalizeDB(data.db);
           if (data.offline) {
             const localDB = normalizeDB(getDB());
-            syncedDB.messages = [...new Set([...(syncedDB.messages || []), ...(localDB.messages || [])])];
-            const syncedRewardIds = new Set((syncedDB.rewards || []).map(reward => String(reward.id)));
-            syncedDB.rewards = [...(syncedDB.rewards || []), ...(localDB.rewards || []).filter(reward => !syncedRewardIds.has(String(reward.id)))];
+            if (String(localDB.familyId || '') === String(familyId)) {
+              for (const key of ['profile', 'points', 'streak', 'tasks', 'extraTasks', 'activities', 'messages', 'alerts', 'rewards', 'rewardRequests', 'taskReviews', 'subjectAccuracy']) {
+                if (localDB[key] !== undefined) syncedDB[key] = localDB[key];
+              }
+            }
           }
           saveDB(syncedDB);
         updateScreenData(currentScreen);
@@ -162,13 +164,31 @@ function normalizeDB(raw = {}) {
   base.alerts = Array.isArray(raw.alerts) ? raw.alerts : [];
   base.extraTasks = Array.isArray(raw.extraTasks) ? raw.extraTasks : [];
   base.activities = Array.isArray(raw.activities) ? raw.activities : [];
+  base.taskReviews = Array.isArray(raw.taskReviews) ? raw.taskReviews : [];
   base.rewards = (Array.isArray(raw.rewards) ? raw.rewards : defaultDB.rewards).map(reward => ({
     ...reward,
-    id: reward.id || reward._id || Date.now()
+    id: String(reward.id || reward._id || Date.now()),
+    _id: String(reward._id || reward.id || '')
   }));
-  base.rewardRequests = Array.isArray(raw.rewardRequests) ? raw.rewardRequests : [];
+  base.rewardRequests = (Array.isArray(raw.rewardRequests) ? raw.rewardRequests : []).map(request => ({
+    ...request,
+    id: String(request.id || request._id || Date.now()),
+    _id: String(request._id || request.id || ''),
+    rewardId: String(request.rewardId || '')
+  }));
   base.subjectAccuracy = raw.subjectAccuracy || {};
   return base;
+}
+
+function saveLoginDB(family, offline = false) {
+  let existing = null;
+  try {
+    existing = JSON.parse(localStorage.getItem('learnmate_db') || 'null');
+  } catch (error) {
+    existing = null;
+  }
+  const sameOfflineFamily = offline && existing && String(existing.familyId || existing._id || '') === String(family._id || family.familyId || '');
+  saveDB(normalizeDB(sameOfflineFamily ? { ...family, ...existing, familyId: family._id || family.familyId } : family));
 }
 
 function emitStateRefresh() {
@@ -264,7 +284,7 @@ async function loginAsParent() {
       localStorage.setItem('learnmate_family_id', data.family._id);
       currentUser = 'parent';
       
-      saveDB(normalizeDB(data.family));
+      saveLoginDB(data.family, data.offline);
       await syncState();
       
       document.getElementById('screen-login').classList.remove('active');
@@ -300,7 +320,7 @@ async function loginAsStudent() {
       localStorage.setItem('learnmate_family_id', data.family._id);
       currentUser = 'student';
       
-      saveDB(normalizeDB(data.family));
+      saveLoginDB(data.family, data.offline);
       await syncState();
       
       document.getElementById('screen-login').classList.remove('active');
@@ -374,18 +394,18 @@ function renderParentHome(db) {
       // 1. 任務審核
       html += submittedTasks.map(t => `
           <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:10px;margin-bottom:6px">
-            <div style="font-size:13px;font-weight:500;margin-bottom:6px">${t.isHabit ? '🏅' : '📝'} ${t.subject} · ${t.topic}</div>
-            <div style="font-size:10px;color:#9ca3af;margin-bottom:8px">${t.isHabit ? '習慣打卡' : `答題完成 · 預計積分 ${t.points || 10} 點`}</div>
+            <div style="font-size:13px;font-weight:500;margin-bottom:6px">${t.isActivity || t.isHabit ? '🏅' : '📝'} ${t.subject} · ${t.topic}</div>
+            <div style="font-size:10px;color:#9ca3af;margin-bottom:8px">${t.isActivity || t.isHabit ? '習慣/活動打卡' : `答題完成 · 待核發 ${t.earnedPoints || 0} 點`}</div>
             <div style="display:flex;gap:6px">
-              <button onclick="approveExtra('${t.id}')" class="p-btn p-btn-green" style="flex:1;font-size:11px;padding:6px;cursor:pointer;border:none;border-radius:6px;color:#fff;background:#2d4a3e">✅ 確認完成</button>
-              <button onclick="rejectExtra('${t.id}')" class="p-btn p-btn-ghost" style="flex:1;font-size:11px;padding:6px;cursor:pointer;border:1px solid #d1d5db;border-radius:6px;background:#fff;color:#555">↩ 退回重做</button>
+              <button onclick="approveExtra('${t._id || t.id}')" class="p-btn p-btn-green" style="flex:1;font-size:11px;padding:6px;cursor:pointer;border:none;border-radius:6px;color:#fff;background:#2d4a3e">✅ 確認完成</button>
+              <button onclick="rejectExtra('${t._id || t.id}')" class="p-btn p-btn-ghost" style="flex:1;font-size:11px;padding:6px;cursor:pointer;border:1px solid #d1d5db;border-radius:6px;background:#fff;color:#555">↩ 退回重做</button>
             </div>
           </div>
       `).join('');
 
       // 2. 獎勵兌換申請
       html += pendingClaims.map(req => {
-        const r = db.rewards.find(x => x.id === req.rewardId) || {};
+        const r = db.rewards.find(x => String(x.id) === String(req.rewardId) || String(x._id) === String(req.rewardId)) || {};
         return `
           <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:10px;margin-bottom:6px">
             <div style="font-size:13px;font-weight:500;margin-bottom:6px">🎁 兌換申請：${r.icon || ''} ${r.name || '獎勵'}</div>
@@ -892,46 +912,65 @@ function renderHabitsScreen(db) {
         <div style="font-size:13px;font-weight:500;color:#0f0f14">${a.name}</div>
         <div style="font-size:10px;color:#9ca3af">${catIcon[a.category] || ''} ${a.category} · ${a.points} 點</div>
       </div>
-      <div onclick="deleteHabit('${a.id}')" style="color:#ef4444;font-size:18px;cursor:pointer;padding:0 4px">×</div>
+      <div onclick="deleteHabit('${a._id || a.id}')" style="color:#ef4444;font-size:18px;cursor:pointer;padding:0 4px">×</div>
     </div>
   `).join('');
 }
 
-function addHabit() {
+async function addHabit() {
   const name = document.getElementById('habit-name').value.trim();
   const icon = document.getElementById('habit-icon').value.trim() || '⭐';
   const category = document.getElementById('habit-category').value;
   const points = parseInt(document.getElementById('habit-points').value) || 10;
   if (!name) return alert('請輸入習慣名稱');
-  const db = getDB();
-  if(!db.activities) db.activities = [];
-  const actId = Date.now().toString();
-  db.activities.push({ id: actId, name, icon, category, points });
-  
-  // 同步派送到學生的任務清單中
-  db.tasks.push({ 
-    id: 'act_' + actId, 
-    subject: category, 
-    topic: name, 
-    status: 'pending', 
-    points: points, 
-    isHabit: true, 
-    icon: icon 
-  });
-  saveDB(db);
-  document.getElementById('habit-name').value = '';
-  document.getElementById('habit-icon').value = '⭐';
-  document.getElementById('habit-points').value = '10';
-  updateScreenData(currentScreen);
+  const familyId = localStorage.getItem('learnmate_family_id');
+  let activityId = null;
+  try {
+    const activityResp = await apiFetch(`${API_BASE}/api/family/${familyId}/activities`, {
+      method: 'POST',
+      body: JSON.stringify({ name, icon, category, points })
+    });
+    const activityData = await activityResp.json();
+    if (!activityResp.ok || !activityData.success) throw new Error(activityData.error || '活動儲存失敗');
+    activityId = activityData.activities?.[activityData.activities.length - 1]?._id || null;
+
+    const taskResp = await apiFetch(`${API_BASE}/api/tasks/create-activity`, {
+      method: 'POST',
+      body: JSON.stringify({ familyId, subject: category, topic: name, points, icon })
+    });
+    const taskData = await taskResp.json();
+    if (!taskResp.ok || !taskData.success) {
+      throw new Error(taskData.error || '學生任務建立失敗');
+    }
+
+    document.getElementById('habit-name').value = '';
+    document.getElementById('habit-icon').value = '⭐';
+    document.getElementById('habit-points').value = '10';
+    await syncState();
+    alert('習慣/活動已儲存並派送至學生端。');
+  } catch (error) {
+    if (activityId) await apiFetch(`${API_BASE}/api/family/${familyId}/activities/${activityId}`, { method: 'DELETE' }).catch(() => null);
+    const db = normalizeDB(getDB());
+    const localId = `local-activity-${Date.now()}`;
+    db.activities.push({ id: localId, name, icon, category, points });
+    db.extraTasks.push({ id: localId, subject: category, topic: name, status: 'pending', points, icon, isActivity: true, questions: [] });
+    saveDB(db);
+    emitStateRefresh();
+    alert(`後端暫時無法儲存，活動已暫存於此瀏覽器供學生端測試：${error.message}`);
+  }
 }
 
-function deleteHabit(activityId) {
+async function deleteHabit(activityId) {
   if (!confirm('確定要刪除這個習慣嗎？')) return;
-  const db = getDB();
-  if(!db.activities) return;
-  db.activities = db.activities.filter(a => a.id !== activityId);
-  saveDB(db);
-  updateScreenData(currentScreen);
+  const familyId = localStorage.getItem('learnmate_family_id');
+  try {
+    const resp = await apiFetch(`${API_BASE}/api/family/${familyId}/activities/${activityId}`, { method: 'DELETE' });
+    const result = await resp.json();
+    if (!resp.ok || !result.success) throw new Error(result.error || '刪除活動失敗');
+    await syncState();
+  } catch (error) {
+    alert(`刪除活動失敗：${error.message}`);
+  }
 }
 
 function renderParentRewards(db) {
@@ -960,8 +999,8 @@ function renderParentRewards(db) {
         <div style="background:#fffbeb;border:1px solid #f6c344;border-radius:8px;padding:10px;margin-bottom:6px">
           <div style="font-size:13px;font-weight:500;margin-bottom:4px">${r.icon} ${r.name}</div>
           <div style="display:flex;gap:6px">
-            <button class="p-btn p-btn-dark" style="font-size:10px" onclick="approveProposal(${r.id})">同意並設定點數</button>
-            <button class="p-btn p-btn-ghost" style="font-size:10px" onclick="rejectProposal(${r.id})">婉拒</button>
+            <button class="p-btn p-btn-dark" style="font-size:10px" onclick="approveProposal('${r.id}')">同意並設定點數</button>
+            <button class="p-btn p-btn-ghost" style="font-size:10px" onclick="rejectProposal('${r.id}')">婉拒</button>
           </div>
         </div>
       `;
@@ -971,7 +1010,7 @@ function renderParentRewards(db) {
   if(requests.length > 0) {
     html += `<div style="font-size:13px;font-weight:500;margin:14px 0 8px;color:#276749">待審核兌換</div>`;
     requests.forEach(req => {
-      const r = db.rewards.find(x => x.id === req.rewardId);
+      const r = db.rewards.find(x => String(x.id) === String(req.rewardId) || String(x._id) === String(req.rewardId));
       if(r) {
         html += `
           <div style="background:#f0fff4;border:1px solid #9ae6b4;border-radius:8px;padding:10px;margin-bottom:6px;display:flex;align-items:center">
@@ -981,8 +1020,8 @@ function renderParentRewards(db) {
               <div style="font-size:10px;color:#276749">扣 ${r.cost} 點</div>
             </div>
             <div style="display:flex;gap:6px">
-              <button class="p-btn p-btn-green" style="font-size:10px" onclick="approveRedeem(${req.id})">同意並留言</button>
-              <button class="p-btn p-btn-ghost" style="font-size:10px" onclick="rejectRedeem(${req.id})">婉拒</button>
+              <button class="p-btn p-btn-green" style="font-size:10px" onclick="approveRedeem('${req.id}')">同意並留言</button>
+              <button class="p-btn p-btn-ghost" style="font-size:10px" onclick="rejectRedeem('${req.id}')">婉拒</button>
             </div>
           </div>
         `;
@@ -992,63 +1031,102 @@ function renderParentRewards(db) {
   list.innerHTML = html;
 }
 
-function approveProposal(id) {
-  const pts = prompt('請設定這個獎勵需要的點數 (例如: 200)');
-  if(pts) {
-    const db = getDB();
-    const r = db.rewards.find(x => x.id === id);
-    if(r) { 
-      r.status = 'ready'; 
-      r.cost = parseInt(pts, 10); 
-      const defaultMsg = `太棒了！爸媽同意了你的新獎勵「${r.icon} ${r.name}」，目標是 ${r.cost} 點，繼續加油喔！`;
-      const msg = prompt('要順便留言給孩子嗎？', defaultMsg);
-      if (msg !== null && msg.trim() !== '') db.messages.push(msg);
-      saveDB(db); 
-      renderParentRewards(db); 
-      alert('設定完成！即將切換回學生端看結果。');
-      switchToStudentRewards();
-    }
-  }
-}
-function rejectProposal(id) {
-  const msg = prompt('請告訴孩子為什麼婉拒這個提議？(例如：這個不適合現在)');
-  const db = getDB();
-  const r = db.rewards.find(x => x.id === id);
-  if (msg && msg.trim() !== '' && r) db.messages.push(`關於「${r.icon} ${r.name}」的許願：${msg}`);
-  db.rewards = db.rewards.filter(x => x.id !== id);
-  saveDB(db); renderParentRewards(db);
-}
-function approveRedeem(reqId) {
-  const db = getDB();
-  const req = db.rewardRequests.find(x => x.id === reqId);
-  if(req) { 
-    req.status = 'approved'; 
-    const r = db.rewards.find(x => x.id === req.rewardId);
-    if(r) {
-      const defaultMsg = `恭喜！爸媽同意了你的兌換「${r.icon} ${r.name}」，請去跟爸媽領取獎勵吧！`;
-      const msg = prompt('要順便留個言給孩子嗎？', defaultMsg);
-      if (msg !== null && msg.trim() !== '') db.messages.push(msg);
-    }
-    saveDB(db); 
-    renderParentRewards(db); 
-    alert('已同意兌換！即將切換回學生端看結果。'); 
-    switchToStudentRewards();
-  }
-}
-function rejectRedeem(reqId) {
-  const msg = prompt('請告訴孩子為什麼婉拒這個兌換？(例如：今天太晚了，明天再換)');
-  if (msg !== null) {
-    const db = getDB();
-    const req = db.rewardRequests.find(x => x.id === reqId);
-    if(req) {
-      const r = db.rewards.find(x => x.id === req.rewardId);
-      if (msg.trim() !== '' && r) db.messages.push(`關於「${r.icon} ${r.name}」的兌換：${msg}`);
-      if(r) db.points += r.cost; // Refund points
-      db.rewardRequests = db.rewardRequests.filter(x => x.id !== reqId);
+async function approveProposal(id) {
+  const cost = Number.parseInt(prompt('請設定這個獎勵需要的點數 (例如: 200)'), 10);
+  if (!Number.isFinite(cost) || cost < 0) return;
+  const reward = getDB().rewards.find(item => String(item.id) === String(id) || String(item._id) === String(id));
+  if (!reward) return alert('找不到這筆獎勵提議，請重新整理後再試。');
+  const message = prompt('要順便留言給孩子嗎？', `爸媽同意了你的新獎勵「${reward.icon} ${reward.name}」，目標是 ${cost} 點。`);
+  if (message === null) return;
+  try {
+    const resp = await apiFetch(`${API_BASE}/api/rewards/approve-proposal`, {
+      method: 'POST',
+      body: JSON.stringify({ familyId: localStorage.getItem('learnmate_family_id'), rewardId: reward._id || reward.id, cost, message })
+    });
+    const result = await resp.json();
+    if (!resp.ok || !result.success) throw new Error(result.error || '設定獎勵失敗');
+    await syncState();
+    alert('獎勵已核准，點數與通知已同步到學生端。');
+  } catch (error) {
+    const db = normalizeDB(getDB());
+    const localReward = db.rewards.find(item => String(item.id) === String(id) || String(item._id) === String(id));
+    if (localReward) {
+      localReward.status = 'ready';
+      localReward.cost = cost;
+      if (message.trim()) db.messages.push(message.trim());
       saveDB(db);
-      renderParentRewards(db);
-      alert('已婉拒，點數已退還！');
-    }
+      emitStateRefresh();
+      alert(`後端未同步；此結果只保存在目前瀏覽器，其他裝置不會收到：${error.message}`);
+    } else alert(`核准失敗：${error.message}`);
+  }
+}
+
+async function rejectProposal(id) {
+  const message = prompt('請告訴孩子為什麼婉拒這個提議。', '謝謝你的提議，這次先不加入；我們可以再一起討論。');
+  if (message === null) return;
+  const reward = getDB().rewards.find(item => String(item.id) === String(id) || String(item._id) === String(id));
+  if (!reward) return alert('找不到這筆獎勵提議，請重新整理後再試。');
+  try {
+    const resp = await apiFetch(`${API_BASE}/api/rewards/reject-proposal`, {
+      method: 'POST',
+      body: JSON.stringify({ familyId: localStorage.getItem('learnmate_family_id'), rewardId: reward._id || reward.id, message })
+    });
+    const result = await resp.json();
+    if (!resp.ok || !result.success) throw new Error(result.error || '婉拒獎勵失敗');
+    await syncState();
+    alert('已婉拒提議，原因已同步到學生端。');
+  } catch (error) {
+    const db = normalizeDB(getDB());
+    const localReward = db.rewards.find(item => String(item.id) === String(id) || String(item._id) === String(id));
+    if (localReward) {
+      db.rewards = db.rewards.filter(item => item !== localReward);
+      db.messages.push(`關於「${localReward.icon} ${localReward.name}」的許願：${message}`);
+      saveDB(db);
+      emitStateRefresh();
+      alert(`後端未同步；婉拒結果只保存在目前瀏覽器，其他裝置不會收到：${error.message}`);
+    } else alert(`婉拒失敗：${error.message}`);
+  }
+}
+
+async function approveRedeem(reqId) {
+  const request = getDB().rewardRequests.find(item => String(item.id) === String(reqId) || String(item._id) === String(reqId));
+  if (!request) return alert('找不到這筆兌換申請，請重新整理後再試。');
+  const reward = getDB().rewards.find(item => String(item.id) === String(request.rewardId) || String(item._id) === String(request.rewardId));
+  if (!reward) return alert('找不到對應獎勵，尚未變更申請狀態。');
+  const message = prompt('要順便留個言給孩子嗎？', `爸媽同意兌換「${reward.icon} ${reward.name}」，請和爸媽確認領取。`);
+  if (message === null) return;
+  try {
+    const resp = await apiFetch(`${API_BASE}/api/rewards/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ familyId: localStorage.getItem('learnmate_family_id'), rewardId: reward._id || reward.id, requestId: request._id || request.id, action: 'approve', message })
+    });
+    const result = await resp.json();
+    if (!resp.ok || !result.success) throw new Error(result.error || '核准兌換失敗');
+    await syncState();
+    alert('兌換已核准，學生端已同步。');
+  } catch (error) {
+    alert(`核准兌換失敗：${error.message}`);
+  }
+}
+
+async function rejectRedeem(reqId) {
+  const message = prompt('請告訴孩子為什麼婉拒這個兌換。', '這次先不兌換，我們再找適合的時間。');
+  if (message === null) return;
+  const request = getDB().rewardRequests.find(item => String(item.id) === String(reqId) || String(item._id) === String(reqId));
+  if (!request) return alert('找不到這筆兌換申請，請重新整理後再試。');
+  const reward = getDB().rewards.find(item => String(item.id) === String(request.rewardId) || String(item._id) === String(request.rewardId));
+  if (!reward) return alert('找不到對應獎勵，尚未變更申請狀態。');
+  try {
+    const resp = await apiFetch(`${API_BASE}/api/rewards/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ familyId: localStorage.getItem('learnmate_family_id'), rewardId: reward._id || reward.id, requestId: request._id || request.id, action: 'reject', message })
+    });
+    const result = await resp.json();
+    if (!resp.ok || !result.success) throw new Error(result.error || '婉拒兌換失敗');
+    await syncState();
+    alert('已婉拒兌換，點數已退回並同步通知學生。');
+  } catch (error) {
+    alert(`婉拒兌換失敗：${error.message}`);
   }
 }
 
@@ -1066,12 +1144,23 @@ async function approveExtra(taskId) {
         message: msg
       })
     });
-    if (resp.ok) {
-      await syncState();
-      alert('已確認完成！積分已成功發放給孩子。');
-    }
+    const result = await resp.json();
+    if (!resp.ok || !result.success) throw new Error(result.error || '確認完成失敗');
+    await syncState();
+    alert('已確認完成！評語與積分已同步到學生端。');
   } catch (e) {
-    alert('操作失敗：' + e.message);
+    const db = normalizeDB(getDB());
+    const task = [...db.tasks, ...db.extraTasks].find(item => String(item._id || item.id) === String(taskId));
+    if (task && task.status === 'submitted') {
+      task.status = 'completed';
+      task.parentNote = msg.trim() || `已確認完成，核發 ${task.earnedPoints || task.points || 15} 點。`;
+      db.points = Number(db.points || 0) + Number(task.earnedPoints || task.points || 15);
+      db.messages.push(`${task.subject}「${task.topic}」評估：${task.parentNote}`);
+      db.taskReviews.push({ ...task, status: 'completed' });
+      saveDB(db);
+      emitStateRefresh();
+      alert(`後端未同步，已在此瀏覽器完成評估：${e.message}`);
+    } else alert('操作失敗：' + e.message);
   }
 }
 
@@ -1089,12 +1178,23 @@ async function rejectExtra(taskId) {
         message: msg
       })
     });
-    if (resp.ok) {
-      await syncState();
-      alert('已退回，孩子會收到通知。');
-    }
+    const result = await resp.json();
+    if (!resp.ok || !result.success) throw new Error(result.error || '退回任務失敗');
+    await syncState();
+    alert('已退回，評估說明已同步到學生端。');
   } catch (e) {
-    alert('操作失敗：' + e.message);
+    const db = normalizeDB(getDB());
+    const task = [...db.tasks, ...db.extraTasks].find(item => String(item._id || item.id) === String(taskId));
+    if (task && task.status === 'submitted') {
+      task.status = 'rejected';
+      task.parentNote = msg.trim() || '請依照建議重新完成。';
+      task.earnedPoints = 0;
+      db.messages.push(`${task.subject}「${task.topic}」評估：${task.parentNote}`);
+      db.taskReviews.push({ ...task, status: 'rejected' });
+      saveDB(db);
+      emitStateRefresh();
+      alert(`後端未同步，已在此瀏覽器退回並通知學生：${e.message}`);
+    } else alert('操作失敗：' + e.message);
   }
 }
 
@@ -1107,7 +1207,7 @@ function switchToStudentRewards() {
   updateScreenData(currentScreen);
 }
 
-function applyStudentTaskResult({ taskId, subject, correctCount, totalCount, pointsAwarded, mode = 'daily', message = '' }) {
+function applyStudentTaskResult({ taskId, subject, correctCount, totalCount, pointsAwarded, awardPoints = pointsAwarded, mode = 'daily', message = '' }) {
   const db = persistAndRefreshDB((state) => {
     const tasks = Array.isArray(state.tasks) ? state.tasks : [];
     const index = tasks.findIndex((t) => String(t.id) === String(taskId) || String(t._id) === String(taskId));
@@ -1118,6 +1218,7 @@ function applyStudentTaskResult({ taskId, subject, correctCount, totalCount, poi
         status: 'completed',
         submittedAt: new Date().toISOString(),
         pointsEarned: Number(pointsAwarded || 0),
+        earnedPoints: Number(pointsAwarded || 0),
         score: Number(correctCount || 0),
         total: Number(totalCount || 0),
         mode,
@@ -1131,13 +1232,14 @@ function applyStudentTaskResult({ taskId, subject, correctCount, totalCount, poi
         status: 'completed',
         submittedAt: new Date().toISOString(),
         pointsEarned: Number(pointsAwarded || 0),
+        earnedPoints: Number(pointsAwarded || 0),
         score: Number(correctCount || 0),
         total: Number(totalCount || 0),
         mode,
       });
     }
 
-    const nextPoints = Number(state.points || 0) + Number(pointsAwarded || 0);
+    const nextPoints = Number(state.points || 0) + Number(awardPoints || 0);
     state.points = nextPoints;
     state.streak = Math.max(Number(state.streak || 0), 1);
     state.subjectAccuracy = state.subjectAccuracy || {};
@@ -1159,10 +1261,12 @@ function applyStudentTaskResult({ taskId, subject, correctCount, totalCount, poi
 
 // --- 學生端邏輯 ---
 function renderStudentHome(db) {
+  const activityTasks = (db.extraTasks || []).filter(task => task.isActivity);
+  const studentTasks = [...(db.tasks || []), ...activityTasks];
   document.getElementById('s-streak-days').textContent = db.streak;
   
-  const completed = db.tasks.filter(t => t.status === 'completed').length;
-  const total = db.tasks.length;
+  const completed = studentTasks.filter(t => t.status === 'completed').length + (db.taskReviews || []).filter(t => t.status === 'completed').length;
+  const total = studentTasks.length + (db.taskReviews || []).filter(t => t.status === 'completed').length;
   document.getElementById('s-tasks-completed').textContent = completed;
   document.getElementById('s-tasks-total').textContent = `/${total}`;
   
@@ -1173,7 +1277,7 @@ function renderStudentHome(db) {
 
   // Messages
   const msgContainer = document.getElementById('s-messages-container');
-  if(db.messages.length > 0) {
+  if((db.messages || []).length > 0) {
     const lastMsg = db.messages[db.messages.length-1];
     msgContainer.innerHTML = `
       <div style="background:#F0FFF4;border:0.5px solid #9AE6B4;border-radius:10px;padding:9px 12px;margin-bottom:9px">
@@ -1185,15 +1289,27 @@ function renderStudentHome(db) {
     msgContainer.innerHTML = '';
   }
 
+  const reviews = (db.taskReviews || []).slice(-3).reverse();
+  if (reviews.length) {
+    msgContainer.insertAdjacentHTML('beforeend', reviews.map(review => `
+      <div style="background:${review.status === 'rejected' ? '#fff5f5' : '#f0fff4'};border:1px solid ${review.status === 'rejected' ? '#fca5a5' : '#9ae6b4'};border-radius:8px;padding:9px 12px;margin-bottom:8px">
+        <div style="font-size:11px;font-weight:600;color:${review.status === 'rejected' ? '#b91c1c' : '#276749'}">${review.status === 'rejected' ? '作業需要再完成' : '家長完成評估'}</div>
+        <div style="font-size:11px;color:#0f0f14">${review.subject} · ${review.topic}</div>
+        ${review.parentNote ? `<div style="font-size:11px;color:#4b5563;margin-top:3px">${review.parentNote}</div>` : ''}
+        ${review.status === 'completed' ? `<div style="font-size:10px;color:#276749;margin-top:3px">已核發 ${review.earnedPoints || 0} 點</div>` : ''}
+      </div>
+    `).join(''));
+  }
+
   // Tasks
   const taskList = document.getElementById('s-tasks-list');
-  taskList.innerHTML = db.tasks.map(t => {
+  taskList.innerHTML = studentTasks.map(t => {
     let icon = '📖';
     if(t.subject==='數學') icon='🔢'; else if(t.subject==='社會') icon='🌍'; else if(t.subject==='英語') icon='💬'; else if(t.subject==='自然') icon='🔬';
-    if(t.isHabit && t.icon) icon = t.icon;
+    if((t.isHabit || t.isActivity) && t.icon) icon = t.icon;
     
     let edition = db.profile && db.profile.editions ? db.profile.editions[t.subject] || '通用版' : '通用版';
-    if(t.isHabit) edition = '習慣與活動';
+    if(t.isHabit || t.isActivity) edition = '習慣與活動';
 
     if(t.status === 'completed') {
       return `
@@ -1203,24 +1319,31 @@ function renderStudentHome(db) {
           <span style="background:#C6F6D5;color:#276749;font-size:9px;font-weight:500;padding:2px 7px;border-radius:10px">✓ 完成</span>
         </div>
       `;
-    } else {
+    } else if (t.status === 'pending') {
       return `
         <div class="subj-row" style="background:rgba(26,26,46,0.03);border-radius:8px;padding:8px;margin:4px -2px;border:1px solid #1a1a2e">
           <div class="subj-icon" style="background:#FEFCBF"><span style="font-size:15px">${icon}</span></div>
           <div style="flex:1"><div class="subj-name">${t.subject}</div><div class="subj-meta">${t.topic} · ${edition}</div></div>
           <div style="display:flex;gap:5px">
-            <div onclick="${t.isHabit ? `finishHabit('${t.id}')` : `startQuiz('${t._id || t.id}', '${t.subject}')`}" class="p-btn p-btn-dark" style="font-size:11px;padding:5px 10px">${t.isHabit ? '完成打卡' : '開始'}</div>
-            <div onclick="prepSkip('${t._id || t.id}', '${t.subject}')" class="p-btn p-btn-ghost" style="font-size:11px;padding:5px 10px">先跳過?</div>
+            <div onclick="${t.isActivity ? `startExtraQuiz('${t._id || t.id}')` : t.isHabit ? `finishHabit('${t.id}')` : `startQuiz('${t._id || t.id}', '${t.subject}')`}" class="p-btn p-btn-dark" style="font-size:11px;padding:5px 10px">${t.isActivity || t.isHabit ? '打卡' : '開始'}</div>
+            ${t.isActivity ? '' : `<div onclick="prepSkip('${t._id || t.id}', '${t.subject}')" class="p-btn p-btn-ghost" style="font-size:11px;padding:5px 10px">先跳過?</div>`}
           </div>
         </div>
       `;
     }
+    if (t.status === 'submitted') {
+      return `<div class="subj-row"><div class="subj-icon" style="background:#fef3c7">⏳</div><div style="flex:1"><div class="subj-name">${t.subject}</div><div class="subj-meta">${t.topic} · 等待家長評估</div></div><span style="font-size:9px;color:#b45309">審核中</span></div>`;
+    }
+    if (t.status === 'rejected') {
+      return `<div class="subj-row" style="border:1px solid #fca5a5"><div class="subj-icon" style="background:#fee2e2">↻</div><div style="flex:1"><div class="subj-name">${t.subject}</div><div class="subj-meta">${t.topic} · ${t.parentNote || '請重新完成'}</div></div><div onclick="${t.isActivity ? `startExtraQuiz('${t._id || t.id}')` : `startQuiz('${t._id || t.id}', '${t.subject}')`}" class="p-btn p-btn-dark" style="font-size:10px;padding:5px 8px">重做</div></div>`;
+    }
+    return '';
   }).join('');
 }
 
 function renderStudentChoose(db) {
   const list = document.getElementById('s-choose-list');
-  const pending = db.tasks.filter(t => t.status === 'pending');
+  const pending = [...(db.tasks || []), ...((db.extraTasks || []).filter(t => t.isActivity))].filter(t => t.status === 'pending');
   
   if(pending.length === 0) {
     list.innerHTML = '<div style="text-align:center;padding:20px;color:#9ca3af;font-size:12px;">今天任務已全數完成！🎉</div>';
@@ -1230,13 +1353,13 @@ function renderStudentChoose(db) {
   list.innerHTML = pending.map(t => {
     let icon = '📖';
     if(t.subject==='數學') icon='🔢'; else if(t.subject==='社會') icon='🌍'; else if(t.subject==='英語') icon='💬'; else if(t.subject==='自然') icon='🔬';
-    if(t.isHabit && t.icon) icon = t.icon;
+    if((t.isHabit || t.isActivity) && t.icon) icon = t.icon;
     return `
-      <div class="drag-card" onclick="${t.isHabit ? `finishHabit('${t.id}')` : `startQuiz('${t._id || t.id}', '${t.subject}')`}">
+      <div class="drag-card" onclick="${t.isActivity ? `startExtraQuiz('${t._id || t.id}')` : t.isHabit ? `finishHabit('${t.id}')` : `startQuiz('${t._id || t.id}', '${t.subject}')`}">
         <div style="font-size:15px;color:#d1d5db;padding-right:2px">⋮⋮</div>
         <div class="subj-icon" style="background:#f3f4f6;width:34px;height:34px"><span style="font-size:15px">${icon}</span></div>
         <div style="flex:1"><div style="font-size:13px;font-weight:500;color:#0f0f14">${t.subject} · ${t.topic}</div></div>
-        <div class="p-btn p-btn-dark" style="font-size:11px;padding:5px 10px">${t.isHabit ? '打卡' : '開始'}</div>
+        <div class="p-btn p-btn-dark" style="font-size:11px;padding:5px 10px">${t.isActivity || t.isHabit ? '打卡' : '開始'}</div>
       </div>
     `;
   }).join('');
@@ -1257,7 +1380,7 @@ function renderStudentRewards(db) {
   if(approvedRequests.length > 0) {
     html += `<div style="font-size:13px;font-weight:500;margin-bottom:8px;color:#276749">✨ 已經可以去領取的獎勵</div>`;
     approvedRequests.forEach(req => {
-      const r = db.rewards.find(x => x.id === req.rewardId);
+      const r = db.rewards.find(x => String(x.id) === String(req.rewardId) || String(x._id) === String(req.rewardId));
       if(r) {
         html += `
           <div class="reward-item" style="background:#F0FFF4;border:1px solid #9AE6B4;border-radius:10px;padding:10px;margin-bottom:8px">
@@ -1295,14 +1418,14 @@ function renderStudentRewards(db) {
   
   html += readyRewards.map(r => {
     const canAfford = db.points >= r.cost;
-    const isPending = db.rewardRequests.some(req => req.rewardId === r.id && req.status === 'pending');
-    const pct = Math.min(100, Math.round((db.points/r.cost)*100));
+    const isPending = db.rewardRequests.some(req => String(req.rewardId) === String(r.id) && req.status === 'pending');
+    const pct = r.cost > 0 ? Math.min(100, Math.round((db.points/r.cost)*100)) : 100;
     
     let btnHtml = '';
     if(isPending) {
       btnHtml = `<div class="p-btn p-btn-ghost" style="font-size:10px;padding:5px 9px;flex-shrink:0;opacity:0.6">審核中...</div>`;
     } else if(canAfford) {
-      btnHtml = `<div onclick="claimReward(${r.id})" class="p-btn p-btn-green" style="font-size:10px;padding:5px 9px;flex-shrink:0">申請兌換</div>`;
+      btnHtml = `<div onclick="claimReward('${r.id}')" class="p-btn p-btn-green" style="font-size:10px;padding:5px 9px;flex-shrink:0">申請兌換</div>`;
     } else {
       btnHtml = `<div class="p-btn p-btn-ghost" style="font-size:10px;padding:5px 9px;flex-shrink:0;opacity:0.5">尚未解鎖</div>`;
     }
@@ -1477,10 +1600,48 @@ function startExtraQuiz(extraId) {
   const db = getDB();
   const task = db.extraTasks.find(t => String(t.id) === String(extraId) || String(t._id) === String(extraId));
   if(!task) return;
+  if (task.isActivity || !Array.isArray(task.questions) || task.questions.length === 0) {
+    document.getElementById('s-quiz-subject').textContent = `${task.subject} (活動)`;
+    activeQuiz = { type: 'extra', id: task._id || task.id, isActivity: true, points: Number(task.points || 10), questions: [] };
+    navTo('screen-student-quiz');
+    document.getElementById('qnum').textContent = '活動打卡';
+    document.getElementById('qcounter').textContent = '';
+    document.getElementById('qtext').textContent = `完成「${task.topic}」後，請按下方送出打卡。`;
+    document.getElementById('qdots').innerHTML = '';
+    document.getElementById('opts').innerHTML = '<button onclick="finishActivity()" class="p-btn p-btn-green p-btn-lg" style="width:100%;font-size:16px">我完成了！</button>';
+    document.getElementById('explain').style.display = 'none';
+    document.getElementById('next-btn').style.display = 'none';
+    document.getElementById('pts-label').textContent = `送出後待家長確認 · ${activeQuiz.points} 點`;
+    return;
+  }
   document.getElementById('s-quiz-subject').textContent = task.subject + ' (加強)';
   activeQuiz = { type: 'extra', id: extraId, questions: task.questions.map(q => ({q:q.q, opts:q.opts, a:q.a, exp:'很棒！'})), currentIdx: 0 };
   navTo('screen-student-quiz');
   renderQuizQ();
+}
+
+async function finishActivity() {
+  if (!activeQuiz?.isActivity) return;
+  try {
+    const resp = await apiFetch(`${API_BASE}/api/tasks/submit`, {
+      method: 'POST',
+      body: JSON.stringify({ taskId: activeQuiz.id, earnedPoints: activeQuiz.points })
+    });
+    const result = await resp.json();
+    if (!resp.ok || !result.success) throw new Error(result.error || '活動打卡送出失敗');
+    const localDB = normalizeDB(getDB());
+    const localTask = (localDB.extraTasks || []).find(task => String(task._id || task.id) === String(activeQuiz.id));
+    if (localTask) {
+      localTask.status = 'submitted';
+      localTask.earnedPoints = activeQuiz.points;
+      saveDB(localDB);
+    }
+    await syncState();
+    alert(`打卡已送出，家長確認後將核發 ${activeQuiz.points} 點。`);
+    navTo('screen-student-home');
+  } catch (error) {
+    alert(`打卡失敗：${error.message}`);
+  }
 }
 
 function renderQuizQ() {
@@ -1569,8 +1730,9 @@ async function finishQuiz() {
     correctCount,
     totalCount,
     pointsAwarded: earnedPoints,
+    awardPoints: 0,
     mode: activeQuiz.type || 'daily',
-    message: `學生已完成 ${subject} 測驗：${correctCount}/${totalCount}，累積 ${earnedPoints} 點。`
+    message: `學生已完成 ${subject} 測驗：${correctCount}/${totalCount}，等待家長評估 ${earnedPoints} 點。`
   });
 
   try {
@@ -1579,7 +1741,7 @@ async function finishQuiz() {
       body: JSON.stringify({
         familyId,
         taskId: activeQuiz.id,
-        pointsToAdd: earnedPoints,
+        pointsToAdd: 0,
         correctCount,
         totalCount,
         subject
@@ -1602,15 +1764,16 @@ async function finishQuiz() {
     console.warn('遠端提交未成功，使用本地狀態同步：', e.message);
   }
 
-  if (localResult && Array.isArray(localResult.tasks)) {
-    const task = localResult.tasks.find((item) => String(item.id) === String(activeQuiz.id) || String(item._id) === String(activeQuiz.id));
+  const latestDB = normalizeDB(getDB());
+  if (Array.isArray(latestDB.tasks)) {
+    const task = latestDB.tasks.find((item) => String(item.id) === String(activeQuiz.id) || String(item._id) === String(activeQuiz.id));
     if (task) {
       task.status = 'submitted';
-      saveDB(localResult);
+      saveDB(latestDB);
     }
   }
 
-  alert(`測驗完成！您答對了 ${correctCount}/${totalCount} 題，獲得了 ${earnedPoints} 點。家長端同步資料已更新。`);
+  alert(`測驗完成！答對 ${correctCount}/${totalCount} 題，${earnedPoints} 點將在家長評估後核發。`);
   navTo('screen-student-home');
 }
 
@@ -1680,46 +1843,28 @@ async function confirmSkip() {
 
 async function finishHabit(taskId) {
   const db = getDB();
-  const task = db.tasks.find(t => String(t.id) === String(taskId));
-  if(task) {
-    const pointsAwarded = Number(task.points || 10);
-    const merged = applyStudentTaskResult({
-      taskId,
-      subject: task.subject,
-      correctCount: 0,
-      totalCount: 0,
-      pointsAwarded,
-      mode: 'habit',
-      message: `習慣打卡完成：${task.subject} · ${task.topic}，獲得 ${pointsAwarded} 點。`
+  const task = [...(db.extraTasks || []), ...(db.tasks || [])].find(t => String(t.id) === String(taskId) || String(t._id) === String(taskId));
+  if (!task) return alert('找不到這筆習慣任務，請重新整理頁面。');
+  const pointsAwarded = Number(task.points || 10);
+  try {
+    const resp = await apiFetch(`${API_BASE}/api/tasks/submit`, {
+      method: 'POST',
+      body: JSON.stringify({ taskId: task._id || task.id, earnedPoints: pointsAwarded })
     });
-
-    try {
-      const familyId = localStorage.getItem('learnmate_family_id');
-      const resp = await apiFetch(`${API_BASE}/api/tasks/complete`, {
-        method: 'POST',
-        body: JSON.stringify({
-          familyId,
-          taskId,
-          pointsToAdd: pointsAwarded,
-          correctCount: 0,
-          totalCount: 0,
-          subject: task.subject
-        })
-      }).catch(() => null);
-      if (resp && resp.ok) {
-        await apiFetch(`${API_BASE}/api/tasks/submit`, {
-          method: 'POST',
-          body: JSON.stringify({ taskId, earnedPoints: pointsAwarded })
-        }).catch(() => null);
-      }
-      await syncState();
-    } catch (e) {
-      console.warn('打卡遠端更新失敗，使用 local state：', e.message);
+    const result = await resp.json();
+    if (!resp.ok || !result.success) throw new Error(result.error || '習慣打卡送出失敗');
+    const localDB = normalizeDB(getDB());
+    const localTask = [...(localDB.extraTasks || []), ...(localDB.tasks || [])].find(item => String(item._id || item.id) === String(task._id || task.id));
+    if (localTask) {
+      localTask.status = 'submitted';
+      localTask.earnedPoints = pointsAwarded;
+      saveDB(localDB);
     }
-
-    saveDB(merged);
-    alert(`打卡成功！已送出審查並獲得 ${pointsAwarded} 點！`);
-    updateScreenData(currentScreen);
+    await syncState();
+    alert(`打卡已送出，家長確認後將核發 ${pointsAwarded} 點。`);
+    navTo('screen-student-home');
+  } catch (error) {
+    alert(`打卡失敗：${error.message}`);
   }
 }
 

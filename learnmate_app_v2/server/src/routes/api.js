@@ -5,6 +5,7 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 
 const Family = require('../models/Family');
 const Task = require('../models/Task');
@@ -114,10 +115,11 @@ router.post('/api/auth/login', async (req, res) => {
     // 0. 離線降級容錯：若資料庫未連線，直接開通離線 Demo 帳戶
     if (mongoose.connection.readyState !== 1) {
       console.warn('⚠️ [Offline Fallback] MongoDB 未連線，已為您自動開通離線體驗帳戶！');
-      const mockId = new mongoose.Types.ObjectId();
+      const normalizedCode = String(familyCode || 'DEMO777').trim().toUpperCase();
+      const mockId = new mongoose.Types.ObjectId(crypto.createHash('sha256').update(normalizedCode).digest('hex').slice(0, 24));
       const mockFamily = {
         _id: mockId,
-        familyCode: familyCode || 'DEMO777',
+        familyCode: normalizedCode,
         childName: '小明 (離線體驗)',
         points: 320,
         streak: 5,
@@ -372,11 +374,12 @@ router.post('/api/tasks/generate', auth, checkSub, async (req, res) => {
 // 直接派發非學科活動任務 (不呼叫 AI)
 router.post('/api/tasks/create-activity', async (req, res) => {
   try {
-    const { familyId, subject, topic } = req.body;
+    const { familyId, subject, topic, points = 10, icon = '⭐' } = req.body;
+    if (!familyId || !subject || !topic) return res.status(400).json({ success: false, error: '缺少活動必要資料' });
     const newTask = await Task.create({
       familyId, type: 'extra', subject, topic,
       totalQuestions: 0, questions: [],
-      isActivity: true, aiGenerated: false
+      item_type: 'habit', isActivity: true, icon, points: Number(points) || 10, aiGenerated: false
     });
     res.json({ success: true, task: newTask });
   } catch (error) {
@@ -410,9 +413,16 @@ router.post('/api/tasks/submit', async (req, res) => {
 router.post('/api/tasks/approve-extra', async (req, res) => {
   try {
     const { familyId, taskId, message } = req.body;
-    const task = await Task.findByIdAndUpdate(taskId, { status: 'completed' }, { new: true });
+    if (!familyId || !taskId) return res.status(400).json({ success: false, error: '缺少家庭或任務識別碼' });
+    const task = await Task.findOne({ _id: taskId, familyId });
+    if (!task) return res.status(404).json({ success: false, error: '找不到待審核任務' });
+    if (task.status !== 'submitted') return res.status(409).json({ success: false, error: '任務目前不是待審核狀態' });
     const family = await Family.findById(familyId);
-    const pts = task.earnedPoints || 15;
+    if (!family) return res.status(404).json({ success: false, error: '找不到家庭帳戶' });
+    const pts = Number(task.earnedPoints || task.points || 15);
+    task.status = 'completed';
+    task.parentNote = String(message || '').trim() || `已確認完成，核發 ${pts} 點。`;
+    await task.save();
     family.points += pts;
     // streak 自動更新
     const todayTW = new Date(Date.now() + 8 * 3600000).toISOString().split('T')[0];
@@ -425,8 +435,8 @@ router.post('/api/tasks/approve-extra', async (req, res) => {
     await checkAndUnlockBadges(family, task);
 
     await family.save();
-    if (message) await Message.create({ familyId, text: message, from: 'parent' });
-    res.json({ success: true, points: family.points });
+    await Message.create({ familyId, text: `${task.subject}「${task.topic}」評估：${task.parentNote}`, from: 'parent' });
+    res.json({ success: true, points: family.points, task });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -436,9 +446,16 @@ router.post('/api/tasks/approve-extra', async (req, res) => {
 router.post('/api/tasks/reject-extra', async (req, res) => {
   try {
     const { familyId, taskId, message } = req.body;
-    await Task.findByIdAndUpdate(taskId, { status: 'rejected', earnedPoints: 0 });
-    if (message) await Message.create({ familyId, text: message, from: 'parent' });
-    res.json({ success: true });
+    if (!familyId || !taskId) return res.status(400).json({ success: false, error: '缺少家庭或任務識別碼' });
+    const task = await Task.findOne({ _id: taskId, familyId });
+    if (!task) return res.status(404).json({ success: false, error: '找不到待審核任務' });
+    if (task.status !== 'submitted') return res.status(409).json({ success: false, error: '任務目前不是待審核狀態' });
+    task.status = 'rejected';
+    task.earnedPoints = 0;
+    task.parentNote = String(message || '').trim() || '請依照建議重新完成。';
+    await task.save();
+    await Message.create({ familyId, text: `${task.subject}「${task.topic}」評估：${task.parentNote}`, from: 'parent' });
+    res.json({ success: true, task });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -567,9 +584,13 @@ router.post('/api/rewards/propose', async (req, res) => {
 router.post('/api/rewards/approve-proposal', async (req, res) => {
   try {
     const { familyId, rewardId, cost, message } = req.body;
-    const reward = await Reward.findByIdAndUpdate(
-      rewardId,
-      { status: 'ready', cost: parseInt(cost) || 0 },
+    const parsedCost = Number.parseInt(cost, 10);
+    if (!familyId || !rewardId || !Number.isInteger(parsedCost) || parsedCost < 0) {
+      return res.status(400).json({ success: false, error: '家庭、獎勵或點數設定不正確' });
+    }
+    const reward = await Reward.findOneAndUpdate(
+      { _id: rewardId, familyId, proposedBy: 'student', status: 'proposed' },
+      { status: 'ready', cost: parsedCost },
       { new: true }
     );
     if (!reward) return res.status(404).json({ success: false, error: '找不到獎勵' });
@@ -584,7 +605,9 @@ router.post('/api/rewards/approve-proposal', async (req, res) => {
 router.post('/api/rewards/reject-proposal', async (req, res) => {
   try {
     const { familyId, rewardId, message } = req.body;
-    await Reward.findByIdAndDelete(rewardId);
+    if (!familyId || !rewardId) return res.status(400).json({ success: false, error: '缺少家庭或獎勵識別碼' });
+    const reward = await Reward.findOneAndDelete({ _id: rewardId, familyId, proposedBy: 'student', status: 'proposed' });
+    if (!reward) return res.status(404).json({ success: false, error: '找不到待審核的獎勵提議' });
     if (message) await Message.create({ familyId, text: message, from: 'parent' });
     res.json({ success: true });
   } catch (error) {
@@ -616,8 +639,13 @@ router.post('/api/rewards/claim', async (req, res) => {
 router.post('/api/rewards/approve', async (req, res) => {
   try {
     const { familyId, rewardId, requestId, action, message } = req.body;
-    const reward = await Reward.findById(rewardId);
+    if (!familyId || !rewardId || !requestId || !['approve', 'reject'].includes(action)) {
+      return res.status(400).json({ success: false, error: '兌換審核資料不完整' });
+    }
+    const reward = await Reward.findOne({ _id: rewardId, familyId });
+    if (!reward) return res.status(404).json({ success: false, error: '找不到獎勵' });
     const reqItem = reward.requests.id(requestId);
+    if (!reqItem) return res.status(404).json({ success: false, error: '找不到待審核的兌換申請' });
     if (action === 'approve') {
       reqItem.status = 'approved';
     } else {
@@ -943,8 +971,12 @@ router.delete('/api/family/:familyId/activities/:activityId', async (req, res) =
   try {
     const family = await Family.findById(req.params.familyId);
     if (!family) return res.status(404).json({ success: false, error: '找不到家庭' });
+    const activity = family.customActivities.id(req.params.activityId);
+    if (!activity) return res.status(404).json({ success: false, error: '找不到活動' });
+    const { name, category } = activity;
     family.customActivities.pull({ _id: req.params.activityId });
     await family.save();
+    await Task.deleteMany({ familyId: family._id, type: 'extra', isActivity: true, subject: category, topic: name, status: 'pending' });
     res.json({ success: true, activities: family.customActivities });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -1048,6 +1080,7 @@ router.get('/api/sync/:familyId', async (req, res) => {
           ],
           extraTasks: [],
           submittedCount: 0,
+          taskReviews: [],
           rewards: [
             { id: 1, name: '玩 Switch 30分鐘', cost: 100, icon: '🎮', proposedBy: 'parent', status: 'ready' },
             { id: 2, name: '看卡通一集', cost: 50, icon: '📺', proposedBy: 'parent', status: 'ready' },
@@ -1067,6 +1100,10 @@ router.get('/api/sync/:familyId', async (req, res) => {
     if (!family) return res.status(404).json({ success: false, error: '找不到家庭' });
 
     const tasks = await Task.find({ familyId });
+    const taskReviews = await Task.find({ familyId, type: 'extra', status: { $in: ['completed', 'rejected'] } })
+      .sort({ updatedAt: -1 })
+      .limit(10)
+      .select('_id subject topic status earnedPoints parentNote updatedAt');
     const rewards = await Reward.find({ familyId });
     const alerts = await Alert.find({ familyId }).sort({ createdAt: -1 });
     const messages = await Message.find({ familyId }).sort({ createdAt: 1 });
@@ -1082,6 +1119,7 @@ router.get('/api/sync/:familyId', async (req, res) => {
         subjectAccuracy: Object.fromEntries(family.subjectAccuracy || new Map()),
         tasks: tasks.filter(t => t.type === 'daily'),
         extraTasks: tasks.filter(t => t.type === 'extra' && t.status !== 'completed'),
+        taskReviews,
         submittedCount: tasks.filter(t => t.type === 'extra' && t.status === 'submitted').length,
         rewards: rewards.map(reward => ({ ...reward.toObject(), id: reward._id.toString() })),
         rewardRequests: rewards.flatMap(r =>

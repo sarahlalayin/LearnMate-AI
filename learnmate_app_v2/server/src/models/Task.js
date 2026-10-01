@@ -6,9 +6,11 @@ const taskSchema = new mongoose.Schema({
   item_type: { type: String, enum: ['academic', 'habit'], default: 'academic' }, // 區分學業與習慣
   subject: { type: String, required: true },
   topic: { type: String, required: false, default: '' }, // 習慣無課本主題，改為非強制
-  status: { type: String, enum: ['pending', 'submitted', 'completed', 'skipped'], default: 'pending' },
+  status: { type: String, enum: ['pending', 'submitted', 'completed', 'skipped', 'rejected'], default: 'pending' },
   points: { type: Number, default: 10 },
   earnedPoints: { type: Number, default: 0 },
+  parentNote: { type: String, default: '' },
+  icon: { type: String, default: '' },
   
   // 習慣打卡專用欄位配置 (Phase B1)
   habit_config: {
