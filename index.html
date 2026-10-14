@@ -1,10 +1,10 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>LearnMate AI - 智慧自律學習平台</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="../src/assets/style.css">
 </head>
 <body>
 
@@ -197,7 +197,10 @@
           <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px" id="p-ai-report-tags">
             <!-- Tags generated dynamically -->
           </div>
-          <div onclick="navTo('screen-parent-msg')" style="background:#a8d5b5;border-radius:16px;padding:7px 14px;font-size:11px;font-weight:500;color:#2d4a3e;display:inline-block;cursor:pointer">根據報告出補強題 →</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <div onclick="navTo('screen-parent-msg')" style="background:#a8d5b5;border-radius:16px;padding:7px 14px;font-size:11px;font-weight:500;color:#2d4a3e;display:inline-block;cursor:pointer">根據報告出補強題 →</div>
+            <div onclick="downloadPassportPDF()" style="background:#4b5563;border-radius:16px;padding:7px 14px;font-size:11px;font-weight:500;color:#fff;display:inline-block;cursor:pointer">📥 匯出成長護照 PDF</div>
+          </div>
         </div>
         
         <div class="p-card">
@@ -278,7 +281,20 @@
             <!-- 習慣列表將由 JS 渲染 -->
           </div>
 
+          <div style="height:1px;background:#e5e7eb;margin:16px 0"></div>
+          
+          <div style="font-size:13px;font-weight:500;margin-bottom:8px">在校教材進度預估與微調</div>
+          <div style="font-size:11px;color:#4b5563;margin-bottom:8px">系統會自動依據開學日期對齊學校進度。若孩子學校進度偏快或偏慢，您可手動微調偏差週數。</div>
+          <div id="progress-prediction-panel" style="background:#f9fafb;border-radius:8px;padding:10px;border:1px solid #e5e7eb;margin-bottom:12px">
+            <div style="font-size:11px;color:#9ca3af;text-align:center">載入教材進度預估中...</div>
+          </div>
+
           <button onclick="saveSettings()" class="p-btn p-btn-dark p-btn-lg" style="margin-top:14px;background:#2d4a3e;color:#a8d5b5">儲存設定</button>
+
+          <div style="height:1px;background:#e5e7eb;margin:24px 0 16px 0"></div>
+          <div style="font-size:13px;font-weight:500;margin-bottom:8px;color:#9B2C2C">測試專區</div>
+          <div style="font-size:11px;color:#4b5563;margin-bottom:12px">如果您想讓下一位體驗者重新測試答題流程，請點擊下方按鈕，系統會將任務與數據清空還原至最初的狀態。</div>
+          <button onclick="resetDemo()" class="p-btn" style="background:#FFF5F5;border:1px solid #FC8181;color:#C53030;padding:12px;width:100%;font-weight:bold;border-radius:12px;cursor:pointer">🔄 重置為預設測試狀態</button>
         </div>
       </div>
       <div class="p-bottom-nav">
@@ -388,6 +404,7 @@
         </div>
         
         <div id="explain" style="display:none;border-radius:10px;padding:10px 12px;margin-bottom:10px"></div>
+        <button id="feedback-trigger-btn" onclick="reportQuizQuestion()" style="display:none;background:#FFF5F5;border:1px solid #FEB2B2;color:#C53030;border-radius:16px;padding:7px 12px;font-size:10px;font-weight:600;cursor:pointer;margin-bottom:12px;width:100%;text-align:center">⚑ 題目有爭議？（答案錯誤/超綱回報）</button>
         
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px; margin-top: 20px;">
           <div id="pts-label" style="font-size:12px;color:#22c55e;font-weight:500;position:relative">
@@ -514,6 +531,101 @@
     
   </div>
 
-  <script src="app_final.js"></script>
+  <!-- ===== 歡迎引導 Modal（首次登入顯示）===== -->
+  <div id="welcome-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.75);align-items:center;justify-content:center;padding:20px">
+    <div style="background:#fff;border-radius:20px;width:100%;max-width:360px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,0.3)">
+      <!-- 步驟指示點 -->
+      <div style="display:flex;justify-content:center;gap:6px;padding:18px 0 0">
+        <div class="wdot" id="wdot-0" style="width:20px;height:8px;border-radius:4px;background:#1a1a2e;transition:all 0.3s"></div>
+        <div class="wdot" id="wdot-1" style="width:8px;height:8px;border-radius:4px;background:#e5e7eb;transition:all 0.3s"></div>
+        <div class="wdot" id="wdot-2" style="width:8px;height:8px;border-radius:4px;background:#e5e7eb;transition:all 0.3s"></div>
+        <div class="wdot" id="wdot-3" style="width:8px;height:8px;border-radius:4px;background:#e5e7eb;transition:all 0.3s"></div>
+      </div>
+      <!-- 步驟 0：歡迎 -->
+      <div class="wstep" id="wstep-0" style="padding:24px;text-align:center">
+        <div style="font-size:48px;margin-bottom:14px">🎉</div>
+        <div style="font-size:20px;font-weight:600;color:#0f0f14;margin-bottom:8px">歡迎來到 LearnMate AI！</div>
+        <div style="font-size:13px;color:#6b7280;line-height:1.7;margin-bottom:18px">智慧自律學習平台，讓孩子愛上學習、<br>讓家長輕鬆掌握學習狀況。</div>
+        <div style="background:#f9fafb;border-radius:12px;padding:14px;text-align:left;margin-bottom:20px">
+          <div style="font-size:11px;font-weight:600;color:#374151;margin-bottom:8px">✨ 這個 App 可以做什麼？</div>
+          <div style="font-size:12px;color:#4b5563;line-height:1.9">
+            👩‍👦 <b>家長端</b>：設定課程、出補強題、即時追蹤<br>
+            🧒 <b>學生端</b>：AI 測驗、賺點數換獎勵<br>
+            🔄 <b>雙端即時同步</b>：家長操作，學生馬上看到
+          </div>
+        </div>
+        <button onclick="nextWelcomeStep(0)" style="width:100%;background:#1a1a2e;color:#e8d5b7;border:none;border-radius:16px;padding:14px;font-size:14px;font-weight:500;cursor:pointer">開始了解 →</button>
+      </div>
+      <!-- 步驟 1：家長端 -->
+      <div class="wstep" id="wstep-1" style="display:none;padding:24px;text-align:center">
+        <div style="font-size:48px;margin-bottom:14px">👩‍👦</div>
+        <div style="font-size:18px;font-weight:600;color:#0f0f14;margin-bottom:14px">家長端操作流程</div>
+        <div style="text-align:left;margin-bottom:20px">
+          <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:10px;background:#f9fafb;border-radius:10px;padding:10px">
+            <div style="width:24px;height:24px;border-radius:12px;background:#1a1a2e;color:#e8d5b7;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex-shrink:0">1</div>
+            <div style="font-size:12px;color:#374151;line-height:1.6"><b>⚙️ 設定</b>：選擇孩子年級、各科教材版本，新增才藝/運動/家事習慣</div>
+          </div>
+          <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:10px;background:#f9fafb;border-radius:10px;padding:10px">
+            <div style="width:24px;height:24px;border-radius:12px;background:#2d4a3e;color:#a8d5b5;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex-shrink:0">2</div>
+            <div style="font-size:12px;color:#374151;line-height:1.6"><b>💬 派題</b>：根據 AI 洞察，一鍵出補強練習題，傳鼓勵留言</div>
+          </div>
+          <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:10px;background:#f9fafb;border-radius:10px;padding:10px">
+            <div style="width:24px;height:24px;border-radius:12px;background:#92600a;color:#fef3c7;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex-shrink:0">3</div>
+            <div style="font-size:12px;color:#374151;line-height:1.6"><b>🏠 快覽</b>：即時收到學生完成通知、獎勵兌換申請，一鍵審核</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button onclick="prevWelcomeStep(1)" style="flex:1;background:#f3f4f6;color:#6b7280;border:none;border-radius:16px;padding:12px;font-size:13px;cursor:pointer">← 上一步</button>
+          <button onclick="nextWelcomeStep(1)" style="flex:2;background:#1a1a2e;color:#e8d5b7;border:none;border-radius:16px;padding:12px;font-size:13px;font-weight:500;cursor:pointer">下一步 →</button>
+        </div>
+      </div>
+      <!-- 步驟 2：學生端 -->
+      <div class="wstep" id="wstep-2" style="display:none;padding:24px;text-align:center">
+        <div style="font-size:48px;margin-bottom:14px">🧒</div>
+        <div style="font-size:18px;font-weight:600;color:#0f0f14;margin-bottom:14px">學生端操作流程</div>
+        <div style="text-align:left;margin-bottom:20px">
+          <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:10px;background:#f0fff4;border-radius:10px;padding:10px">
+            <div style="font-size:20px">🤖</div>
+            <div style="font-size:12px;color:#374151;line-height:1.6"><b>AI 出題測驗</b>：依據年級、版本、學校進度，生成專屬題目</div>
+          </div>
+          <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:10px;background:#fffbeb;border-radius:10px;padding:10px">
+            <div style="font-size:20px">⭐</div>
+            <div style="font-size:12px;color:#374151;line-height:1.6"><b>賺點數換獎勵</b>：完成任務得點數，申請兌換喜歡的獎勵</div>
+          </div>
+          <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:10px;background:#eff6ff;border-radius:10px;padding:10px">
+            <div style="font-size:20px">📹</div>
+            <div style="font-size:12px;color:#374151;line-height:1.6"><b>AI 影片推薦</b>：根據弱科和進度，推薦最適合的 YouTube 學習影片</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button onclick="prevWelcomeStep(2)" style="flex:1;background:#f3f4f6;color:#6b7280;border:none;border-radius:16px;padding:12px;font-size:13px;cursor:pointer">← 上一步</button>
+          <button onclick="nextWelcomeStep(2)" style="flex:2;background:#2d4a3e;color:#a8d5b5;border:none;border-radius:16px;padding:12px;font-size:13px;font-weight:500;cursor:pointer">下一步 →</button>
+        </div>
+      </div>
+      <!-- 步驟 3：開始 -->
+      <div class="wstep" id="wstep-3" style="display:none;padding:24px;text-align:center">
+        <div style="font-size:48px;margin-bottom:14px">🚀</div>
+        <div style="font-size:18px;font-weight:600;color:#0f0f14;margin-bottom:8px">準備好了！</div>
+        <div style="font-size:12px;color:#6b7280;line-height:1.7;margin-bottom:16px">建議第一步：先到 <b>⚙️ 設定</b> 頁面<br>選擇孩子的年級和教材版本。</div>
+        <div style="background:#1a1a2e;border-radius:12px;padding:14px;margin-bottom:20px;text-align:left">
+          <div style="font-size:11px;color:#a8d5b5;margin-bottom:8px;font-weight:600">📍 頁面導覽</div>
+          <div style="font-size:11px;color:rgba(232,213,183,0.85);line-height:2">
+            🏠 快覽 → 今日任務總覽 &amp; 待審核<br>
+            ⚡ 預警 → 學習問題早期發現<br>
+            💬 派題 → 出補強練習 &amp; 傳留言<br>
+            📊 洞察 → AI 週報 &amp; 各科正確率圖表<br>
+            ⭐ 獎勵 → 獎勵清單 &amp; 兌換審核<br>
+            ⚙️ 設定 → 年級/版本/習慣設定
+          </div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button onclick="prevWelcomeStep(3)" style="flex:1;background:#f3f4f6;color:#6b7280;border:none;border-radius:16px;padding:12px;font-size:13px;cursor:pointer">← 上一步</button>
+          <button onclick="closeWelcome()" style="flex:2;background:#2d4a3e;color:#a8d5b5;border:none;border-radius:16px;padding:12px;font-size:13px;font-weight:600;cursor:pointer">開始使用 🎉</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app_api.js?v=9"></script>
 </body>
 </html>

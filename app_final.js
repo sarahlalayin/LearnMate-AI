@@ -1,4 +1,61 @@
 // --- AI 設定 (Gemini 2.0 Flash) ---
+const API_BASE = window.location.origin;
+
+// 輔助函式：自訂 API 呼叫，自動帶上 JWT Token
+async function apiFetch(url, options = {}) {
+  const token = localStorage.getItem('learnmate_token');
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(options.headers || {})
+  };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  
+  const resp = await fetch(url, {
+    ...options,
+    headers
+  });
+  
+  if (resp.status === 401) {
+    console.warn('憑證過期或無效，請重新登入');
+    localStorage.removeItem('learnmate_token');
+    localStorage.removeItem('learnmate_family_id');
+    logout();
+    throw new Error('未授權，已自動登出');
+  }
+  
+  return resp;
+}
+
+// 狀態同步：自後端拉取 MongoDB 的 Family 狀態，更新本地 LocalStorage
+async function syncState() {
+  const familyId = localStorage.getItem('learnmate_family_id');
+  if (!familyId) return;
+  try {
+    const resp = await apiFetch(`${API_BASE}/api/sync/${familyId}`);
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data.success && data.db) {
+          const syncedDB = normalizeDB(data.db);
+          if (data.offline) {
+            const localDB = normalizeDB(getDB());
+            if (String(localDB.familyId || '') === String(familyId)) {
+              for (const key of ['profile', 'points', 'streak', 'tasks', 'extraTasks', 'activities', 'messages', 'alerts', 'rewards', 'rewardRequests', 'taskReviews', 'subjectAccuracy']) {
+                if (localDB[key] !== undefined) syncedDB[key] = localDB[key];
+              }
+            }
+          }
+          saveDB(syncedDB);
+        updateScreenData(currentScreen);
+        console.log('🔄 [State Sync] 已從 MongoDB 成功對齊前端 LocalStorage 狀態。');
+      }
+    }
+  } catch (e) {
+    console.error('狀態同步失敗：', e.message);
+  }
+}
+
 // API Key 從 localStorage 動態讀取，支援 Demo 輸入框設定
 // 預設備援 Key：為了安全考量，請勿將明文 API Key 寫死在程式碼中！
 // 如果 localStorage 無設定，系統會要求使用者從 UI 輸入，或直接呼叫後端。
@@ -50,9 +107,9 @@ const defaultDB = {
     }
   },
   tasks: [
-    { id: 1, subject: '國語', topic: '第十課', status: 'completed', points: 10 },
-    { id: 2, subject: '數學', topic: '第一~六單元總複習', status: 'completed', points: 10 },
-    { id: 3, subject: '社會', topic: '台灣歷史', status: 'completed', points: 10 },
+    { id: 1, subject: '國語', topic: '第十課', status: 'pending', points: 10 },
+    { id: 2, subject: '數學', topic: '第一~六單元總複習', status: 'pending', points: 10 },
+    { id: 3, subject: '社會', topic: '台灣歷史', status: 'pending', points: 10 },
     { id: 4, subject: '英語', topic: '現在進行式', status: 'pending', points: 10 },
     { id: 5, subject: '自然', topic: '植物的構造', status: 'pending', points: 10 }
   ],
@@ -88,9 +145,112 @@ function getDB() {
   if(!db.messages) db.messages = [];
   if(!db.alerts) db.alerts = [];
   if(!db.rewards) db.rewards = defaultDB.rewards;
+  if(!db.profile) db.profile = defaultDB.profile;
+  if(!db.activities) db.activities = defaultDB.activities || [];
   return db;
 }
 function saveDB(db) { localStorage.setItem('learnmate_db', JSON.stringify(db)); }
+
+function normalizeDB(raw = {}) {
+  const base = { ...defaultDB, ...raw };
+  base.profile = { ...defaultDB.profile, ...(raw.profile || {}) };
+  base.profile.editions = { ...defaultDB.profile.editions, ...(raw.profile?.editions || {}) };
+  base.tasks = Array.isArray(raw.tasks) && raw.tasks.length > 0
+    ? raw.tasks
+    : (Array.isArray(defaultDB.tasks) ? defaultDB.tasks.map(task => ({ ...task })) : []);
+  base.points = Number(raw.points ?? defaultDB.points ?? 0);
+  base.streak = Number(raw.streak ?? defaultDB.streak ?? 0);
+  base.messages = Array.isArray(raw.messages) ? raw.messages : [];
+  base.alerts = Array.isArray(raw.alerts) ? raw.alerts : [];
+  base.extraTasks = Array.isArray(raw.extraTasks) ? raw.extraTasks : [];
+  base.activities = Array.isArray(raw.activities) ? raw.activities : [];
+  base.taskReviews = Array.isArray(raw.taskReviews) ? raw.taskReviews : [];
+  base.rewards = (Array.isArray(raw.rewards) ? raw.rewards : defaultDB.rewards).map(reward => ({
+    ...reward,
+    id: String(reward.id || reward._id || Date.now()),
+    _id: String(reward._id || reward.id || '')
+  }));
+  base.rewardRequests = (Array.isArray(raw.rewardRequests) ? raw.rewardRequests : []).map(request => ({
+    ...request,
+    id: String(request.id || request._id || Date.now()),
+    _id: String(request._id || request.id || ''),
+    rewardId: String(request.rewardId || '')
+  }));
+  base.subjectAccuracy = raw.subjectAccuracy || {};
+  return base;
+}
+
+function saveLoginDB(family, offline = false) {
+  let existing = null;
+  try {
+    existing = JSON.parse(localStorage.getItem('learnmate_db') || 'null');
+  } catch (error) {
+    existing = null;
+  }
+  const incomingId = String(family._id || family.familyId || '');
+  const existingId = String(existing?.familyId || existing?._id || '');
+  const sameFamily = incomingId && existingId && incomingId === existingId;
+
+  // ★ 修復 P0-2：若是相同帳號再次登入，合併保留本地設定
+  if (sameFamily) {
+    // 保留家長端已設定的重要資料（profile/activities/rewards等），
+    // 但讓後端資料優先（tasks/points/streak等即時數據）
+    const merged = normalizeDB({
+      ...family,          // 後端最新資料為底
+      familyId: incomingId,
+      // 若後端有 activities，優先用後端；否則保留本地
+      activities: (Array.isArray(family.activities) && family.activities.length > 0)
+        ? family.activities : (existing.activities || []),
+      // 若後端有 rewards，優先用後端；否則保留本地
+      rewards: (Array.isArray(family.rewards) && family.rewards.length > 0)
+        ? family.rewards : (existing.rewards || defaultDB.rewards),
+    });
+    saveDB(merged);
+  } else if (offline && existing && existingId === incomingId) {
+    saveDB(normalizeDB({ ...family, ...existing, familyId: incomingId }));
+  } else {
+    saveDB(normalizeDB(family));
+  }
+}
+
+
+function emitStateRefresh() {
+  const db = getDB();
+  saveDB(db);
+  window.dispatchEvent(new CustomEvent('learnmate-state-sync', { detail: db }));
+  if (currentScreen && currentScreen !== 'screen-login') {
+    updateScreenData(currentScreen);
+  }
+}
+
+function persistAndRefreshDB(mutator, options = {}) {
+  const db = normalizeDB(getDB());
+  const patched = typeof mutator === 'function' ? mutator(db) : db;
+  const next = normalizeDB(patched);
+  saveDB(next);
+  if (options.notify !== false) {
+    emitStateRefresh();
+  }
+  return next;
+}
+
+function getDemoFamily(code) {
+  const normalized = String(code || '').trim().toUpperCase();
+  const isValidDemo = /^DEMO\d+$/i.test(normalized) && normalized !== 'DEMO999';
+  if (!isValidDemo) {
+    return null;
+  }
+  const base = normalizeDB({
+    ...defaultDB,
+    childName: '小明',
+    familyCode: normalized,
+    _id: `demo-${normalized.toLowerCase()}`,
+    points: 320,
+    streak: 5,
+    messages: ['寶貝今天辛苦了！你已經做得很棒了，剩下的我們一起努力 ❤️']
+  });
+  return base;
+}
 
 // --- 導覽與畫面切換 ---
 function navTo(screenId) {
@@ -114,6 +274,7 @@ function updateScreenData(screenId) {
   const db = getDB();
   if (screenId === 'screen-parent-home') renderParentHome(db);
   else if (screenId === 'screen-parent-alerts') renderParentAlerts(db);
+  else if (screenId === 'screen-parent-msg') renderParentMsg(db);
   else if (screenId === 'screen-parent-insights') renderParentInsights(db);
   else if (screenId === 'screen-parent-settings') { renderParentSettings(db); renderHabitsScreen(db); }
   else if (screenId === 'screen-parent-rewards') renderParentRewards(db);
@@ -125,40 +286,100 @@ function updateScreenData(screenId) {
 }
 
 // --- 登入邏輯 ---
-function loginAsParent() {
-  const code = document.getElementById('family-code-input').value;
-  if(code !== familyCode) { alert('家庭代碼錯誤'); return; }
-  const keyInput = document.getElementById('gemini-key-input');
-  if (keyInput && keyInput.value.trim()) setGeminiKey(keyInput.value.trim());
-  currentUser = 'parent';
-  initDB();
-  document.getElementById('screen-login').classList.remove('active');
-  document.getElementById('app-container').style.display = 'block';
-  setTimeout(updateNavPosition, 50);
-  navTo('screen-parent-home');
+async function loginAsParent() {
+  const code = document.getElementById('family-code-input').value.trim();
+  if (!code) { alert('請輸入家庭代碼'); return; }
+
+  if (code === 'DEMO999') {
+    alert('登入失敗：此體驗帳號 (DEMO999) 已停用，請改用 DEMO123 或其他有效 demo 帳號。');
+    return;
+  }
+
+  try {
+    const resp = await fetch(`${API_BASE}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ familyCode: code })
+    });
+    const data = await resp.json();
+    if (data.success) {
+      localStorage.setItem('learnmate_token', data.accessToken);
+      localStorage.setItem('learnmate_family_id', data.family._id);
+      currentUser = 'parent';
+      
+      saveLoginDB(data.family, data.offline);
+      await syncState();
+      
+      document.getElementById('screen-login').classList.remove('active');
+      document.getElementById('app-container').style.display = 'block';
+      setTimeout(updateNavPosition, 50);
+      navTo('screen-parent-home');
+
+      // ★ P0-1：偵測是否首次登入，顯示歡迎引導
+      checkAndShowWelcome();
+      // ★ P0-5：啟動後台輪詢（30秒同步一次）
+      startPolling();
+    } else {
+      alert('登入失敗：' + (data.error || '家庭代碼不存在或後端驗證失敗。請確認代碼是否正確。'));
+    }
+  } catch (e) {
+    alert('無法連接至後端伺服器，請檢查網路或改用有效 demo 帳號（例如 DEMO123）。\n錯誤：' + e.message);
+  }
 }
 
-function loginAsStudent() {
-  const code = document.getElementById('family-code-input').value;
-  if(code !== familyCode) { alert('家庭代碼錯誤'); return; }
-  const keyInput = document.getElementById('gemini-key-input');
-  if (keyInput && keyInput.value.trim()) setGeminiKey(keyInput.value.trim());
-  currentUser = 'student';
-  initDB();
-  document.getElementById('screen-login').classList.remove('active');
-  document.getElementById('app-container').style.display = 'block';
-  setTimeout(updateNavPosition, 50);
-  navTo('screen-student-home');
+
+async function loginAsStudent() {
+  const code = document.getElementById('family-code-input').value.trim();
+  if (!code) { alert('請輸入家庭代碼'); return; }
+
+  if (code === 'DEMO999') {
+    alert('登入失敗：此體驗帳號 (DEMO999) 已停用，請改用 DEMO123 或其他有效 demo 帳號。');
+    return;
+  }
+
+  try {
+    const resp = await fetch(`${API_BASE}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ familyCode: code })
+    });
+    const data = await resp.json();
+    if (data.success) {
+      localStorage.setItem('learnmate_token', data.accessToken);
+      localStorage.setItem('learnmate_family_id', data.family._id);
+      currentUser = 'student';
+      
+      saveLoginDB(data.family, data.offline);
+      await syncState();
+      
+      document.getElementById('screen-login').classList.remove('active');
+      document.getElementById('app-container').style.display = 'block';
+      setTimeout(updateNavPosition, 50);
+      navTo('screen-student-home');
+
+      // ★ P0-5：啟動後台輪詢（學生端 15 秒同步一次，更即時）
+      startPolling(15000);
+    } else {
+      alert('登入失敗：' + (data.error || '家庭代碼不存在或後端驗證失敗。請確認代碼是否正確。'));
+    }
+  } catch (e) {
+    alert('無法連接至後端伺服器，請檢查網路或改用有效 demo 帳號（例如 DEMO123）。\n錯誤：' + e.message);
+  }
 }
+
 
 function logout() {
+  stopPolling(); // ★ P0-5：停止輪詢
   document.getElementById('app-container').style.display = 'none';
   const current = document.getElementById(currentScreen);
   if(current) current.classList.remove('active');
   currentScreen = 'screen-login';
   document.getElementById('screen-login').classList.add('active');
+  localStorage.removeItem('learnmate_token');
+  localStorage.removeItem('learnmate_family_id');
   currentUser = null;
 }
+
 
 // --- 家長端邏輯 ---
 function renderParentHome(db) {
@@ -189,6 +410,65 @@ function renderParentHome(db) {
           <div style="font-size:10px;color:#22c55e;line-height:1.4">小明已完成 ${completed} 項任務。</div>
         </div>
       </div>`;
+  }
+
+  // ★ 待確認任務取得 (包含任務、獎勵兌換申請、獎勵許願)
+  const dailySubmitted = (db.tasks || []).filter(t => t.status === 'submitted');
+  const extraSubmitted = (db.extraTasks || []).filter(t => t.status === 'submitted');
+  const submittedTasks = [...dailySubmitted, ...extraSubmitted];
+  const pendingClaims = (db.rewardRequests || []).filter(r => r.status === 'pending');
+  const proposedRewards = (db.rewards || []).filter(r => r.status === 'proposed');
+  
+  const totalPending = submittedTasks.length + pendingClaims.length + proposedRewards.length;
+  const reviewPanel = document.getElementById('p-review-panel');
+  if (reviewPanel) {
+    if (totalPending > 0) {
+      reviewPanel.style.display = 'block';
+      let html = `<div style="font-size:13px;font-weight:600;color:#0f0f14;margin-bottom:8px">⏳ 待確認項目（${totalPending}）</div>`;
+      
+      // 1. 任務審核
+      html += submittedTasks.map(t => `
+          <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:10px;margin-bottom:6px">
+            <div style="font-size:13px;font-weight:500;margin-bottom:6px">${t.isActivity || t.isHabit ? '🏅' : '📝'} ${t.subject} · ${t.topic}</div>
+            <div style="font-size:10px;color:#9ca3af;margin-bottom:8px">${t.isActivity || t.isHabit ? '習慣/活動打卡' : `答題完成 · 待核發 ${t.earnedPoints || 0} 點`}</div>
+            <div style="display:flex;gap:6px">
+              <button onclick="approveExtra('${t._id || t.id}')" class="p-btn p-btn-green" style="flex:1;font-size:11px;padding:6px;cursor:pointer;border:none;border-radius:6px;color:#fff;background:#2d4a3e">✅ 確認完成</button>
+              <button onclick="rejectExtra('${t._id || t.id}')" class="p-btn p-btn-ghost" style="flex:1;font-size:11px;padding:6px;cursor:pointer;border:1px solid #d1d5db;border-radius:6px;background:#fff;color:#555">↩ 退回重做</button>
+            </div>
+          </div>
+      `).join('');
+
+      // 2. 獎勵兌換申請
+      html += pendingClaims.map(req => {
+        const r = db.rewards.find(x => String(x.id) === String(req.rewardId) || String(x._id) === String(req.rewardId)) || {};
+        return `
+          <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:10px;margin-bottom:6px">
+            <div style="font-size:13px;font-weight:500;margin-bottom:6px">🎁 兌換申請：${r.icon || ''} ${r.name || '獎勵'}</div>
+            <div style="font-size:10px;color:#9ca3af;margin-bottom:8px">花費 ${r.cost || 0} 點</div>
+            <div style="display:flex;gap:6px">
+              <button onclick="approveRedeem('${req.id}')" class="p-btn p-btn-green" style="flex:1;font-size:11px;padding:6px;cursor:pointer;border:none;border-radius:6px;color:#fff;background:#2d4a3e">✅ 同意兌換</button>
+              <button onclick="rejectRedeem('${req.id}')" class="p-btn p-btn-ghost" style="flex:1;font-size:11px;padding:6px;cursor:pointer;border:1px solid #d1d5db;border-radius:6px;background:#fff;color:#555">↩ 婉拒</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      // 3. 獎勵許願
+      html += proposedRewards.map(r => `
+          <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:10px;margin-bottom:6px">
+            <div style="font-size:13px;font-weight:500;margin-bottom:6px">✨ 新獎勵許願：${r.icon} ${r.name}</div>
+            <div style="font-size:10px;color:#9ca3af;margin-bottom:8px">請設定目標點數</div>
+            <div style="display:flex;gap:6px">
+              <button onclick="approveProposal('${r.id}')" class="p-btn p-btn-dark" style="flex:1;font-size:11px;padding:6px;cursor:pointer;border:none;border-radius:6px;color:#fff;background:#1a1a2e">✍ 設定點數</button>
+              <button onclick="rejectProposal('${r.id}')" class="p-btn p-btn-ghost" style="flex:1;font-size:11px;padding:6px;cursor:pointer;border:1px solid #d1d5db;border-radius:6px;background:#fff;color:#555">↩ 婉拒</button>
+            </div>
+          </div>
+      `).join('');
+
+      reviewPanel.innerHTML = html;
+    } else {
+      reviewPanel.style.display = 'none';
+    }
   }
 
   // 預警預覽
@@ -272,25 +552,35 @@ function renderParentInsights(db) {
   // ★ 非同步：呼叫 Gemini 生成真實週報（不阻塞畫面）
   loadAIWeeklyReport(db, completionRate, insightText);
 
-  // 長條圖
-  const barData = [
-    { sub: '國語', val: 90, color: '#1a1a2e' },
-    { sub: '數學', val: 84, color: '#22c55e' },
-    { sub: '社會', val: 78, color: '#1a1a2e' },
-    { sub: '自然', val: 85, color: '#1a1a2e' },
-    { sub: '英語', val: 44, color: '#ef4444' }
-  ];
+  // ★ P0-6：長條圖改從 db.subjectAccuracy 動態讀取（不再硬編碼）
+  const subjects = Object.keys(db.profile?.editions || { '國語':1,'數學':1,'社會':1,'自然':1,'英語':1 });
+  const accuracyMap = db.subjectAccuracy || {};
+  // 計算各科正確率，預設用 75%（示範數值）
+  const barData = subjects.map(sub => {
+    const val = accuracyMap[sub] !== undefined ? Number(accuracyMap[sub]) : 75;
+    const color = val < 60 ? '#ef4444' : val >= 85 ? '#22c55e' : '#1a1a2e';
+    return { sub, val, color };
+  });
+
+  // 更新首頁平均正確率
+  const avgAccuracy = barData.length > 0
+    ? Math.round(barData.reduce((s, b) => s + b.val, 0) / barData.length)
+    : 0;
+  const accEl = document.getElementById('p-stat-accuracy');
+  if (accEl) accEl.textContent = `${avgAccuracy}%`;
+
   const list = document.getElementById('p-insights-bars');
   if(list) {
     list.innerHTML = barData.map(b => `
       <div class="bar-row">
         <div class="bar-label">${b.sub}</div>
-        <div class="bar-track"><div class="bar-fill" style="width:${b.val}%;background:${b.color}"></div></div>
+        <div class="bar-track"><div class="bar-fill" style="width:${b.val}%;background:${b.color};transition:width 0.6s ease"></div></div>
         <div class="bar-pct" style="color:${b.val<60?'#ef4444':b.color}">${b.val}%</div>
       </div>
     `).join('');
   }
 }
+
 
 // ★ AI 週報非同步載入（不阻塞主渲染）
 async function loadAIWeeklyReport(db, completionRate, fallbackText) {
@@ -324,12 +614,23 @@ async function loadAIWeeklyReport(db, completionRate, fallbackText) {
 }
 
 function fillMsg(text) { document.getElementById('msg-input').value = text; }
-function sendMsg() {
+async function sendMsg() {
   const text = document.getElementById('msg-input').value;
   if(!text.trim()) return;
   const db = getDB();
   db.messages.push(text);
   saveDB(db);
+  try {
+    const familyId = localStorage.getItem('learnmate_family_id');
+    const resp = await apiFetch(`${API_BASE}/api/messages/send`, {
+      method: 'POST',
+      body: JSON.stringify({ familyId, text })
+    });
+    if (!resp.ok) throw new Error('留言同步失敗');
+    await syncState();
+  } catch (error) {
+    console.warn('留言已暫存本機，後端同步失敗：', error.message);
+  }
   document.getElementById('msg-input').value = '';
   const sent = document.getElementById('msg-sent');
   sent.style.display = 'block';
@@ -396,6 +697,20 @@ JSON 格式範例：
     pool.push({ q: '植物行光合作用需要什麼氣體？', opts: ['氧氣', '二氧化碳', '氮氣', '氫氣'], a: 1, exp: '光合作用吸收二氧化碳，釋放氧氣。' });
     pool.push({ q: '哪一部分負責吸收水分？', opts: ['葉子', '莖', '根', '花'], a: 2, exp: '根部從土壤吸收水分。' });
     pool.push({ q: '植物的「血管」是哪部分？', opts: ['葉脈', '維管束', '表皮', '氣孔'], a: 1, exp: '維管束輸送水分和養分。' });
+    pool.push({ q: '地球自轉一圈需要多少時間？', opts: ['一天', '一個月', '一年', '一小時'], a: 0, exp: '地球自轉一圈為一天（約24小時）。' });
+    pool.push({ q: '下列哪種物質會被磁鐵吸引？', opts: ['銅線', '鋁罐', '鐵釘', '塑膠尺'], a: 2, exp: '磁鐵能吸引鐵製品。' });
+  } else if (subject === '國語') {
+    pool.push({ q: '下列哪個字的部首是「水」部？', opts: ['江', '樹', '山', '火'], a: 0, exp: '「江」的部首是水部。' });
+    pool.push({ q: '「興高采烈」的意思是？', opts: ['生氣的樣子', '非常高興的樣子', '難過的樣子', '害怕的樣子'], a: 1, exp: '形容非常高興、興致勃勃的樣子。' });
+    pool.push({ q: '下列哪個詞語是「反義詞」？', opts: ['高興/快樂', '黑/白', '美麗/漂亮', '大/巨大'], a: 1, exp: '黑和白意思相反。' });
+    pool.push({ q: '「春眠不覺曉，處處聞啼鳥」是誰的詩句？', opts: ['李白', '杜甫', '孟浩然', '白居易'], a: 2, exp: '出自孟浩然的《春曉》。' });
+    pool.push({ q: '下列何者的詞性與「跑步」相同？', opts: ['漂亮', '蘋果', '唱歌', '紅色'], a: 2, exp: '「跑步」與「唱歌」皆為動詞。' });
+  } else if (subject === '社會') {
+    pool.push({ q: '台灣最長的河流是？', opts: ['淡水河', '濁水溪', '大甲溪', '高屏溪'], a: 1, exp: '濁水溪是台灣最長的河流。' });
+    pool.push({ q: '台灣的原住民族中，目前人口最多的是？', opts: ['阿美族', '排灣族', '泰雅族', '布農族'], a: 0, exp: '目前阿美族人口最多。' });
+    pool.push({ q: '台灣的氣候主要屬於？', opts: ['寒帶氣候', '溫帶氣候', '熱帶/副熱帶季風氣候', '乾燥氣候'], a: 2, exp: '台灣主要為熱帶與副熱帶季風氣候。' });
+    pool.push({ q: '下列哪個城市被稱為台灣的「首都」？', opts: ['高雄市', '台中市', '台北市', '台南市'], a: 2, exp: '台北市為台灣的政治與經濟中心。' });
+    pool.push({ q: '鄭成功來台的主要目的是為了什麼？', opts: ['反清復明', '發展貿易', '尋找黃金', '建立國家'], a: 0, exp: '鄭成功以台灣為反清復明的基地。' });
   } else {
     for (let i = 0; i < count; i++) {
       pool.push({ q: `關於「${topic}」第 ${i+1} 題（${edition} ${grade}年級）`, opts: ['選項A', '選項B', '選項C', '選項D'], a: 0, exp: 'Mock 示範題。' });
@@ -405,49 +720,186 @@ JSON 格式範例：
   return shuffled.slice(0, count).map(q => ({ q: q.q, opts: q.opts, a: q.a, exp: q.exp || '太棒了！', aiGenerated: false }));
 }
 
+// --- 依據進度自動帶入單元主題 ---
+async function updateTopicFromProgress(subject) {
+  const familyId = localStorage.getItem('learnmate_family_id');
+  if (!familyId) return;
+
+  const topicInput = document.getElementById('topic-input');
+  if (!topicInput) return;
+
+  const db = getDB();
+  const activityCategories = [...new Set((db.activities || []).map(a => a.category))];
+  if (activityCategories.includes(subject)) {
+    topicInput.value = '';
+    topicInput.placeholder = '請輸入活動任務詳情或留空';
+    return;
+  }
+
+  topicInput.placeholder = '正在預估學校教材單元進度...';
+  topicInput.value = '';
+
+  try {
+    const resp = await apiFetch(`${API_BASE}/api/progress/predict?familyId=${familyId}`);
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data.success && data.progressList) {
+        const p = data.progressList.find(item => item.subject === subject);
+        if (p && p.unit) {
+          topicInput.value = p.unit;
+        } else {
+          topicInput.value = '';
+          topicInput.placeholder = '未找到進度單元，請手動輸入';
+        }
+      }
+    }
+  } catch (e) {
+    console.error('預估單元失敗：', e.message);
+    topicInput.placeholder = '預測失敗，請手動輸入';
+  }
+}
+
+// --- 派題選單動態生成 ---
+function renderParentMsg(db) {
+  const select = document.getElementById('topic-subject');
+  const btn = document.getElementById('gen-btn');
+  
+  if (select) {
+    const editions = db.profile?.editions || {};
+    const subs = Object.keys(editions);
+    const activityCategories = [...new Set((db.activities || []).map(a => a.category))];
+    
+    select.innerHTML = subs.map(s => `<option value="${s}">${s}</option>`).join('') +
+                       activityCategories.map(c => `<option value="${c}">⭐ ${c}</option>`).join('');
+                        
+    select.onchange = async (e) => {
+      const val = e.target.value;
+      const isActivity = activityCategories.includes(val);
+      if(btn) btn.textContent = isActivity ? '直接派發任務 →' : '從題庫生成 →';
+      await updateTopicFromProgress(val);
+    };
+    
+    // Trigger onchange to set initial button state & load progress topic
+    if(select.value) {
+      const val = select.value;
+      const isActivity = activityCategories.includes(val);
+      if(btn) btn.textContent = isActivity ? '直接派發任務 →' : '從題庫生成 →';
+      updateTopicFromProgress(val);
+    }
+  }
+}
+
+
+
+let tempTaskId = null;
 let mockGeneratedQuiz = [];
+
 async function generateQuiz() {
   const topic = document.getElementById('topic-input').value;
   const subject = document.getElementById('topic-subject').value;
   if (!topic.trim()) return alert('請輸入主題');
 
+  const db = getDB();
+  const activityCategories = [...new Set((db.activities || []).map(a => a.category))];
+  const isActivity = activityCategories.includes(subject);
+
   const btn = document.getElementById('gen-btn');
   btn.disabled = true;
+
+  if (isActivity) {
+    btn.textContent = '派發中...';
+    try {
+      const familyId = localStorage.getItem('learnmate_family_id');
+      const resp = await apiFetch(`${API_BASE}/api/tasks/create-activity`, {
+        method: 'POST',
+        body: JSON.stringify({ familyId, subject, topic })
+      });
+      const data = await resp.json();
+      if (data.success) {
+        await syncState();
+        alert('非學科任務已自動派發給學生！');
+        document.getElementById('topic-input').value = '';
+        updateScreenData(currentScreen);
+      } else {
+        alert('派發失敗：' + data.error);
+      }
+    } catch (e) {
+      alert('網路連線失敗：' + e.message);
+    }
+    btn.disabled = false;
+    btn.textContent = '直接派發任務 →';
+    return;
+  }
+
   btn.textContent = '✨ Gemini AI 生成中...';
 
   try {
-    mockGeneratedQuiz = await fetchAIQuestions(subject, topic, 4);
-    const isAI = mockGeneratedQuiz[0]?.aiGenerated;
+    const familyId = localStorage.getItem('learnmate_family_id');
+    const grade = db.profile?.grade || '5';
+    const edition = db.profile?.editions?.[subject] || '康軒版';
 
-    btn.disabled = false;
-    btn.textContent = isAI ? '重新生成 (Gemini AI) →' : '重新生成 →';
-    document.getElementById('preview-box').style.display = 'block';
-    document.getElementById('published-box').style.display = 'none';
+    const resp = await apiFetch(`${API_BASE}/api/tasks/generate`, {
+      method: 'POST',
+      body: JSON.stringify({
+        subject,
+        topic,
+        grade,
+        edition,
+        familyId,
+        count: 4
+      })
+    });
 
-    const list = document.getElementById('quiz-preview-list');
-    const badge = isAI
-      ? `<span style="background:#e8f5e9;color:#2d4a3e;font-size:9px;font-weight:500;padding:2px 7px;border-radius:8px;margin-left:6px">✨ Gemini AI 生成</span>`
-      : `<span style="background:#f3f4f6;color:#6b7280;font-size:9px;padding:2px 7px;border-radius:8px;margin-left:6px">Mock 模式</span>`;
-    list.innerHTML = `<div style="margin-bottom:8px">${badge}</div>` + mockGeneratedQuiz.map((mq, i) => `
-      <div class="pq"><div class="pq-num">Q${i+1}</div><div class="pq-q">${mq.q}</div>
-        ${mq.opts.map((opt, j) => `<div class="pq-opt ${j===mq.a?'correct-opt':''}">${String.fromCharCode(65+j)}. ${opt} ${j===mq.a?'✓':''}</div>`).join('')}
-        <div style="font-size:10px;color:#888;margin-top:4px;border-top:1px dashed #ddd;padding-top:4px">解析: ${mq.exp}</div>
-      </div>
-    `).join('');
+    const data = await resp.json();
+    if (data.success && data.task) {
+      tempTaskId = data.task._id;
+      mockGeneratedQuiz = data.task.questions;
+
+      const isAI = data.aiGenerated;
+      btn.disabled = false;
+      btn.textContent = isAI ? '重新生成 (Gemini AI) →' : '重新生成 →';
+      document.getElementById('preview-box').style.display = 'block';
+      document.getElementById('published-box').style.display = 'none';
+
+      const list = document.getElementById('quiz-preview-list');
+      const badge = isAI
+        ? `<span style="background:#e8f5e9;color:#2d4a3e;font-size:9px;font-weight:500;padding:2px 7px;border-radius:8px;margin-left:6px">✨ Gemini AI 生成 (經 Critic 審查 ${data.criticAttempts || 1} 次)</span>`
+        : `<span style="background:#f3f4f6;color:#6b7280;font-size:9px;padding:2px 7px;border-radius:8px;margin-left:6px">題庫 DB 模式</span>`;
+      
+      list.innerHTML = `<div style="margin-bottom:8px">${badge}</div>` + mockGeneratedQuiz.map((mq, i) => `
+        <div class="pq"><div class="pq-num">Q${i+1}</div><div class="pq-q">${mq.q}</div>
+          ${mq.opts.map((opt, j) => `<div class="pq-opt ${j===mq.a?'correct-opt':''}">${String.fromCharCode(65+j)}. ${opt} ${j===mq.a?'✓':''}</div>`).join('')}
+          <div style="font-size:10px;color:#888;margin-top:4px;border-top:1px dashed #ddd;padding-top:4px">解析: ${mq.exp || '太棒了！'}</div>
+        </div>
+      `).join('');
+    } else {
+      throw new Error(data.error || '後端生成出錯');
+    }
   } catch (e) {
     btn.disabled = false;
     btn.textContent = '重試生成';
-    alert('生成失敗，請再試一次。');
+    alert('生成失敗，請再試一次。原因：' + e.message);
   }
 }
 
-function hidePreview() { document.getElementById('preview-box').style.display = 'none'; }
-function publishQuiz() {
-  const subject = document.getElementById('topic-subject').value;
-  const topic = document.getElementById('topic-input').value;
-  const db = getDB();
-  db.extraTasks.push({ subject, topic, questions: mockGeneratedQuiz, id: Date.now() });
-  saveDB(db);
+async function hidePreview() {
+  if (tempTaskId) {
+    try {
+      await apiFetch(`${API_BASE}/api/tasks/${tempTaskId}`, {
+        method: 'DELETE'
+      });
+      console.log('🗑️ [Preview Cancel] 已清理臨時任務：', tempTaskId);
+    } catch (e) {
+      console.warn('清理臨時任務失敗：', e.message);
+    }
+    tempTaskId = null;
+  }
+  document.getElementById('preview-box').style.display = 'none';
+}
+
+async function publishQuiz() {
+  tempTaskId = null; // 標記為正式確認
+  await syncState();
   
   document.getElementById('preview-box').style.display = 'none';
   document.getElementById('published-box').style.display = 'block';
@@ -460,20 +912,47 @@ function renderParentSettings(db) {
   document.getElementById('set-grade').value = db.profile.grade;
   ['國語','數學','社會','自然','英語'].forEach(sub => {
     const el = document.getElementById(`set-ed-${sub}`);
-    if(el) el.value = db.profile.editions[sub] || '通用版';
+    if(el) el.value = (db.profile.editions instanceof Map ? db.profile.editions.get(sub) : db.profile.editions[sub]) || '通用版';
   });
+  loadProgressTuningPanel();
 }
 
-function saveSettings() {
+async function saveSettings() {
   const db = getDB();
   db.profile.grade = document.getElementById('set-grade').value;
   ['國語','數學','社會','自然','英語'].forEach(sub => {
     const el = document.getElementById(`set-ed-${sub}`);
     if(el) db.profile.editions[sub] = el.value;
   });
-  saveDB(db);
-  alert('設定已儲存！');
+  saveDB(normalizeDB(db));
+  try {
+    const familyId = localStorage.getItem('learnmate_family_id');
+    const resp = await apiFetch(`${API_BASE}/api/profile/update`, {
+      method: 'POST',
+      body: JSON.stringify({ familyId, grade: db.profile.grade, editions: db.profile.editions })
+    });
+    if (!resp.ok) throw new Error('設定同步失敗');
+
+    // ★ P0-3：後端儲存成功後，同步更新學生端任務（重新拉取）
+    await syncState();
+
+    // 刷新學生端 tasks 以反映新設定（把 tasks 的 edition 欄位更新）
+    const updatedDB = normalizeDB(getDB());
+    if (Array.isArray(updatedDB.tasks)) {
+      updatedDB.tasks = updatedDB.tasks.map(t => ({
+        ...t,
+        topic: t.topic // 保留主題，但 edition 由前端重新讀取
+      }));
+      saveDB(updatedDB);
+    }
+
+    alert('✅ 設定已儲存！學生端已同步，下次測驗將使用新設定出題。');
+  } catch (error) {
+    emitStateRefresh();
+    alert(`設定已儲存在本機，但尚未同步後端：${error.message}`);
+  }
 }
+
 
 // --- 習慣管理 (Mock) ---
 function renderHabitsScreen(db) {
@@ -492,46 +971,65 @@ function renderHabitsScreen(db) {
         <div style="font-size:13px;font-weight:500;color:#0f0f14">${a.name}</div>
         <div style="font-size:10px;color:#9ca3af">${catIcon[a.category] || ''} ${a.category} · ${a.points} 點</div>
       </div>
-      <div onclick="deleteHabit('${a.id}')" style="color:#ef4444;font-size:18px;cursor:pointer;padding:0 4px">×</div>
+      <div onclick="deleteHabit('${a._id || a.id}')" style="color:#ef4444;font-size:18px;cursor:pointer;padding:0 4px">×</div>
     </div>
   `).join('');
 }
 
-function addHabit() {
+async function addHabit() {
   const name = document.getElementById('habit-name').value.trim();
   const icon = document.getElementById('habit-icon').value.trim() || '⭐';
   const category = document.getElementById('habit-category').value;
   const points = parseInt(document.getElementById('habit-points').value) || 10;
   if (!name) return alert('請輸入習慣名稱');
-  const db = getDB();
-  if(!db.activities) db.activities = [];
-  const actId = Date.now().toString();
-  db.activities.push({ id: actId, name, icon, category, points });
-  
-  // 同步派送到學生的任務清單中
-  db.tasks.push({ 
-    id: 'act_' + actId, 
-    subject: category, 
-    topic: name, 
-    status: 'pending', 
-    points: points, 
-    isHabit: true, 
-    icon: icon 
-  });
-  saveDB(db);
-  document.getElementById('habit-name').value = '';
-  document.getElementById('habit-icon').value = '⭐';
-  document.getElementById('habit-points').value = '10';
-  updateScreenData(currentScreen);
+  const familyId = localStorage.getItem('learnmate_family_id');
+  let activityId = null;
+  try {
+    const activityResp = await apiFetch(`${API_BASE}/api/family/${familyId}/activities`, {
+      method: 'POST',
+      body: JSON.stringify({ name, icon, category, points })
+    });
+    const activityData = await activityResp.json();
+    if (!activityResp.ok || !activityData.success) throw new Error(activityData.error || '活動儲存失敗');
+    activityId = activityData.activities?.[activityData.activities.length - 1]?._id || null;
+
+    const taskResp = await apiFetch(`${API_BASE}/api/tasks/create-activity`, {
+      method: 'POST',
+      body: JSON.stringify({ familyId, subject: category, topic: name, points, icon })
+    });
+    const taskData = await taskResp.json();
+    if (!taskResp.ok || !taskData.success) {
+      throw new Error(taskData.error || '學生任務建立失敗');
+    }
+
+    document.getElementById('habit-name').value = '';
+    document.getElementById('habit-icon').value = '⭐';
+    document.getElementById('habit-points').value = '10';
+    await syncState();
+    alert('習慣/活動已儲存並派送至學生端。');
+  } catch (error) {
+    if (activityId) await apiFetch(`${API_BASE}/api/family/${familyId}/activities/${activityId}`, { method: 'DELETE' }).catch(() => null);
+    const db = normalizeDB(getDB());
+    const localId = `local-activity-${Date.now()}`;
+    db.activities.push({ id: localId, name, icon, category, points });
+    db.extraTasks.push({ id: localId, subject: category, topic: name, status: 'pending', points, icon, isActivity: true, questions: [] });
+    saveDB(db);
+    emitStateRefresh();
+    alert(`後端暫時無法儲存，活動已暫存於此瀏覽器供學生端測試：${error.message}`);
+  }
 }
 
-function deleteHabit(activityId) {
+async function deleteHabit(activityId) {
   if (!confirm('確定要刪除這個習慣嗎？')) return;
-  const db = getDB();
-  if(!db.activities) return;
-  db.activities = db.activities.filter(a => a.id !== activityId);
-  saveDB(db);
-  updateScreenData(currentScreen);
+  const familyId = localStorage.getItem('learnmate_family_id');
+  try {
+    const resp = await apiFetch(`${API_BASE}/api/family/${familyId}/activities/${activityId}`, { method: 'DELETE' });
+    const result = await resp.json();
+    if (!resp.ok || !result.success) throw new Error(result.error || '刪除活動失敗');
+    await syncState();
+  } catch (error) {
+    alert(`刪除活動失敗：${error.message}`);
+  }
 }
 
 function renderParentRewards(db) {
@@ -539,6 +1037,8 @@ function renderParentRewards(db) {
   const activeRewards = db.rewards.filter(r => r.status === 'ready');
   const proposedRewards = db.rewards.filter(r => r.status === 'proposed');
   const requests = db.rewardRequests.filter(r => r.status === 'pending');
+  // ★ P1-10：取出已兌換的歷史記錄
+  const approvedRequests = db.rewardRequests.filter(r => r.status === 'approved');
 
   let html = `<div style="font-size:13px;font-weight:500;margin-bottom:8px">獎勵清單</div>`;
   activeRewards.forEach(r => {
@@ -560,8 +1060,8 @@ function renderParentRewards(db) {
         <div style="background:#fffbeb;border:1px solid #f6c344;border-radius:8px;padding:10px;margin-bottom:6px">
           <div style="font-size:13px;font-weight:500;margin-bottom:4px">${r.icon} ${r.name}</div>
           <div style="display:flex;gap:6px">
-            <button class="p-btn p-btn-dark" style="font-size:10px" onclick="approveProposal(${r.id})">同意並設定點數</button>
-            <button class="p-btn p-btn-ghost" style="font-size:10px" onclick="rejectProposal(${r.id})">婉拒</button>
+            <button class="p-btn p-btn-dark" style="font-size:10px" onclick="approveProposal('${r.id}')">同意並設定點數</button>
+            <button class="p-btn p-btn-ghost" style="font-size:10px" onclick="rejectProposal('${r.id}')">婉拒</button>
           </div>
         </div>
       `;
@@ -569,9 +1069,9 @@ function renderParentRewards(db) {
   }
 
   if(requests.length > 0) {
-    html += `<div style="font-size:13px;font-weight:500;margin:14px 0 8px;color:#276749">待審核兌換</div>`;
+    html += `<div style="font-size:13px;font-weight:500;margin:14px 0 8px;color:#276749">⏳ 待審核兌換</div>`;
     requests.forEach(req => {
-      const r = db.rewards.find(x => x.id === req.rewardId);
+      const r = db.rewards.find(x => String(x.id) === String(req.rewardId) || String(x._id) === String(req.rewardId));
       if(r) {
         html += `
           <div style="background:#f0fff4;border:1px solid #9ae6b4;border-radius:8px;padding:10px;margin-bottom:6px;display:flex;align-items:center">
@@ -581,74 +1081,205 @@ function renderParentRewards(db) {
               <div style="font-size:10px;color:#276749">扣 ${r.cost} 點</div>
             </div>
             <div style="display:flex;gap:6px">
-              <button class="p-btn p-btn-green" style="font-size:10px" onclick="approveRedeem(${req.id})">同意並留言</button>
-              <button class="p-btn p-btn-ghost" style="font-size:10px" onclick="rejectRedeem(${req.id})">婉拒</button>
+              <button class="p-btn p-btn-green" style="font-size:10px" onclick="approveRedeem('${req.id}')">同意並留言</button>
+              <button class="p-btn p-btn-ghost" style="font-size:10px" onclick="rejectRedeem('${req.id}')">婉拒</button>
             </div>
           </div>
         `;
       }
     });
   }
+
+  // ★ P1-10：已兌換歷史記錄
+  if(approvedRequests.length > 0) {
+    html += `<div style="height:1px;background:#e5e7eb;margin:16px 0"></div>`;
+    html += `<div style="font-size:13px;font-weight:500;margin-bottom:8px;color:#4b5563">✅ 已兌換記錄（${approvedRequests.length} 筆）</div>`;
+    approvedRequests.slice(-5).reverse().forEach(req => {
+      const r = db.rewards.find(x => String(x.id) === String(req.rewardId) || String(x._id) === String(req.rewardId));
+      if(r) {
+        const dateStr = req.date ? new Date(req.date).toLocaleDateString('zh-TW') : '';
+        html += `
+          <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:10px;margin-bottom:6px;display:flex;align-items:center;opacity:0.8">
+            <div style="font-size:18px;margin-right:10px">${r.icon}</div>
+            <div style="flex:1">
+              <div style="font-size:12px;font-weight:500;color:#374151">${r.name}</div>
+              <div style="font-size:10px;color:#9ca3af">${dateStr} · 已同意兌換 ${r.cost} 點</div>
+            </div>
+            <div style="font-size:9px;background:#dcfce7;color:#166534;padding:3px 8px;border-radius:8px">✓ 已兌換</div>
+          </div>
+        `;
+      }
+    });
+  }
+
   list.innerHTML = html;
 }
 
-function approveProposal(id) {
-  const pts = prompt('請設定這個獎勵需要的點數 (例如: 200)');
-  if(pts) {
-    const db = getDB();
-    const r = db.rewards.find(x => x.id === id);
-    if(r) { 
-      r.status = 'ready'; 
-      r.cost = parseInt(pts, 10); 
-      const defaultMsg = `太棒了！爸媽同意了你的新獎勵「${r.icon} ${r.name}」，目標是 ${r.cost} 點，繼續加油喔！`;
-      const msg = prompt('要順便留言給孩子嗎？', defaultMsg);
-      if (msg !== null && msg.trim() !== '') db.messages.push(msg);
-      saveDB(db); 
-      renderParentRewards(db); 
-      alert('設定完成！即將切換回學生端看結果。');
-      switchToStudentRewards();
-    }
-  }
-}
-function rejectProposal(id) {
-  const msg = prompt('請告訴孩子為什麼婉拒這個提議？(例如：這個不適合現在)');
-  const db = getDB();
-  const r = db.rewards.find(x => x.id === id);
-  if (msg && msg.trim() !== '' && r) db.messages.push(`關於「${r.icon} ${r.name}」的許願：${msg}`);
-  db.rewards = db.rewards.filter(x => x.id !== id);
-  saveDB(db); renderParentRewards(db);
-}
-function approveRedeem(reqId) {
-  const db = getDB();
-  const req = db.rewardRequests.find(x => x.id === reqId);
-  if(req) { 
-    req.status = 'approved'; 
-    const r = db.rewards.find(x => x.id === req.rewardId);
-    if(r) {
-      const defaultMsg = `恭喜！爸媽同意了你的兌換「${r.icon} ${r.name}」，請去跟爸媽領取獎勵吧！`;
-      const msg = prompt('要順便留個言給孩子嗎？', defaultMsg);
-      if (msg !== null && msg.trim() !== '') db.messages.push(msg);
-    }
-    saveDB(db); 
-    renderParentRewards(db); 
-    alert('已同意兌換！即將切換回學生端看結果。'); 
-    switchToStudentRewards();
-  }
-}
-function rejectRedeem(reqId) {
-  const msg = prompt('請告訴孩子為什麼婉拒這個兌換？(例如：今天太晚了，明天再換)');
-  if (msg !== null) {
-    const db = getDB();
-    const req = db.rewardRequests.find(x => x.id === reqId);
-    if(req) {
-      const r = db.rewards.find(x => x.id === req.rewardId);
-      if (msg.trim() !== '' && r) db.messages.push(`關於「${r.icon} ${r.name}」的兌換：${msg}`);
-      if(r) db.points += r.cost; // Refund points
-      db.rewardRequests = db.rewardRequests.filter(x => x.id !== reqId);
+
+async function approveProposal(id) {
+  const cost = Number.parseInt(prompt('請設定這個獎勵需要的點數 (例如: 200)'), 10);
+  if (!Number.isFinite(cost) || cost < 0) return;
+  const reward = getDB().rewards.find(item => String(item.id) === String(id) || String(item._id) === String(id));
+  if (!reward) return alert('找不到這筆獎勵提議，請重新整理後再試。');
+  const message = prompt('要順便留言給孩子嗎？', `爸媽同意了你的新獎勵「${reward.icon} ${reward.name}」，目標是 ${cost} 點。`);
+  if (message === null) return;
+  try {
+    const resp = await apiFetch(`${API_BASE}/api/rewards/approve-proposal`, {
+      method: 'POST',
+      body: JSON.stringify({ familyId: localStorage.getItem('learnmate_family_id'), rewardId: reward._id || reward.id, cost, message })
+    });
+    const result = await resp.json();
+    if (!resp.ok || !result.success) throw new Error(result.error || '設定獎勵失敗');
+    await syncState();
+    alert('獎勵已核准，點數與通知已同步到學生端。');
+  } catch (error) {
+    const db = normalizeDB(getDB());
+    const localReward = db.rewards.find(item => String(item.id) === String(id) || String(item._id) === String(id));
+    if (localReward) {
+      localReward.status = 'ready';
+      localReward.cost = cost;
+      if (message.trim()) db.messages.push(message.trim());
       saveDB(db);
-      renderParentRewards(db);
-      alert('已婉拒，點數已退還！');
-    }
+      emitStateRefresh();
+      alert(`後端未同步；此結果只保存在目前瀏覽器，其他裝置不會收到：${error.message}`);
+    } else alert(`核准失敗：${error.message}`);
+  }
+}
+
+async function rejectProposal(id) {
+  const message = prompt('請告訴孩子為什麼婉拒這個提議。', '謝謝你的提議，這次先不加入；我們可以再一起討論。');
+  if (message === null) return;
+  const reward = getDB().rewards.find(item => String(item.id) === String(id) || String(item._id) === String(id));
+  if (!reward) return alert('找不到這筆獎勵提議，請重新整理後再試。');
+  try {
+    const resp = await apiFetch(`${API_BASE}/api/rewards/reject-proposal`, {
+      method: 'POST',
+      body: JSON.stringify({ familyId: localStorage.getItem('learnmate_family_id'), rewardId: reward._id || reward.id, message })
+    });
+    const result = await resp.json();
+    if (!resp.ok || !result.success) throw new Error(result.error || '婉拒獎勵失敗');
+    await syncState();
+    alert('已婉拒提議，原因已同步到學生端。');
+  } catch (error) {
+    const db = normalizeDB(getDB());
+    const localReward = db.rewards.find(item => String(item.id) === String(id) || String(item._id) === String(id));
+    if (localReward) {
+      db.rewards = db.rewards.filter(item => item !== localReward);
+      db.messages.push(`關於「${localReward.icon} ${localReward.name}」的許願：${message}`);
+      saveDB(db);
+      emitStateRefresh();
+      alert(`後端未同步；婉拒結果只保存在目前瀏覽器，其他裝置不會收到：${error.message}`);
+    } else alert(`婉拒失敗：${error.message}`);
+  }
+}
+
+async function approveRedeem(reqId) {
+  const request = getDB().rewardRequests.find(item => String(item.id) === String(reqId) || String(item._id) === String(reqId));
+  if (!request) return alert('找不到這筆兌換申請，請重新整理後再試。');
+  const reward = getDB().rewards.find(item => String(item.id) === String(request.rewardId) || String(item._id) === String(request.rewardId));
+  if (!reward) return alert('找不到對應獎勵，尚未變更申請狀態。');
+  const message = prompt('要順便留個言給孩子嗎？', `爸媽同意兌換「${reward.icon} ${reward.name}」，請和爸媽確認領取。`);
+  if (message === null) return;
+  try {
+    const resp = await apiFetch(`${API_BASE}/api/rewards/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ familyId: localStorage.getItem('learnmate_family_id'), rewardId: reward._id || reward.id, requestId: request._id || request.id, action: 'approve', message })
+    });
+    const result = await resp.json();
+    if (!resp.ok || !result.success) throw new Error(result.error || '核准兌換失敗');
+    await syncState();
+    alert('兌換已核准，學生端已同步。');
+  } catch (error) {
+    alert(`核准兌換失敗：${error.message}`);
+  }
+}
+
+async function rejectRedeem(reqId) {
+  const message = prompt('請告訴孩子為什麼婉拒這個兌換。', '這次先不兌換，我們再找適合的時間。');
+  if (message === null) return;
+  const request = getDB().rewardRequests.find(item => String(item.id) === String(reqId) || String(item._id) === String(reqId));
+  if (!request) return alert('找不到這筆兌換申請，請重新整理後再試。');
+  const reward = getDB().rewards.find(item => String(item.id) === String(request.rewardId) || String(item._id) === String(request.rewardId));
+  if (!reward) return alert('找不到對應獎勵，尚未變更申請狀態。');
+  try {
+    const resp = await apiFetch(`${API_BASE}/api/rewards/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ familyId: localStorage.getItem('learnmate_family_id'), rewardId: reward._id || reward.id, requestId: request._id || request.id, action: 'reject', message })
+    });
+    const result = await resp.json();
+    if (!resp.ok || !result.success) throw new Error(result.error || '婉拒兌換失敗');
+    await syncState();
+    alert('已婉拒兌換，點數已退回並同步通知學生。');
+  } catch (error) {
+    alert(`婉拒兌換失敗：${error.message}`);
+  }
+}
+
+async function approveExtra(taskId) {
+  const msg = prompt('確認完成！要順便給孩子留言鼓勵嗎？(可留空不填)', '');
+  if (msg === null) return;
+  
+  try {
+    const familyId = localStorage.getItem('learnmate_family_id');
+    const resp = await apiFetch(`${API_BASE}/api/tasks/approve-extra`, {
+      method: 'POST',
+      body: JSON.stringify({
+        familyId,
+        taskId,
+        message: msg
+      })
+    });
+    const result = await resp.json();
+    if (!resp.ok || !result.success) throw new Error(result.error || '確認完成失敗');
+    await syncState();
+    alert('已確認完成！評語與積分已同步到學生端。');
+  } catch (e) {
+    const db = normalizeDB(getDB());
+    const task = [...db.tasks, ...db.extraTasks].find(item => String(item._id || item.id) === String(taskId));
+    if (task && task.status === 'submitted') {
+      task.status = 'completed';
+      task.parentNote = msg.trim() || `已確認完成，核發 ${task.earnedPoints || task.points || 15} 點。`;
+      db.points = Number(db.points || 0) + Number(task.earnedPoints || task.points || 15);
+      db.messages.push(`${task.subject}「${task.topic}」評估：${task.parentNote}`);
+      db.taskReviews.push({ ...task, status: 'completed' });
+      saveDB(db);
+      emitStateRefresh();
+      alert(`後端未同步，已在此瀏覽器完成評估：${e.message}`);
+    } else alert('操作失敗：' + e.message);
+  }
+}
+
+async function rejectExtra(taskId) {
+  const msg = prompt('請告訴孩子為什麼需要重做？', '請再認真完成一次！');
+  if (msg === null) return;
+  
+  try {
+    const familyId = localStorage.getItem('learnmate_family_id');
+    const resp = await apiFetch(`${API_BASE}/api/tasks/reject-extra`, {
+      method: 'POST',
+      body: JSON.stringify({
+        familyId,
+        taskId,
+        message: msg
+      })
+    });
+    const result = await resp.json();
+    if (!resp.ok || !result.success) throw new Error(result.error || '退回任務失敗');
+    await syncState();
+    alert('已退回，評估說明已同步到學生端。');
+  } catch (e) {
+    const db = normalizeDB(getDB());
+    const task = [...db.tasks, ...db.extraTasks].find(item => String(item._id || item.id) === String(taskId));
+    if (task && task.status === 'submitted') {
+      task.status = 'rejected';
+      task.parentNote = msg.trim() || '請依照建議重新完成。';
+      task.earnedPoints = 0;
+      db.messages.push(`${task.subject}「${task.topic}」評估：${task.parentNote}`);
+      db.taskReviews.push({ ...task, status: 'rejected' });
+      saveDB(db);
+      emitStateRefresh();
+      alert(`後端未同步，已在此瀏覽器退回並通知學生：${e.message}`);
+    } else alert('操作失敗：' + e.message);
   }
 }
 
@@ -661,12 +1292,83 @@ function switchToStudentRewards() {
   updateScreenData(currentScreen);
 }
 
+function applyStudentTaskResult({ taskId, subject, correctCount, totalCount, pointsAwarded, awardPoints = pointsAwarded, mode = 'daily', message = '' }) {
+  const db = persistAndRefreshDB((state) => {
+    const tasks = Array.isArray(state.tasks) ? state.tasks : [];
+    const index = tasks.findIndex((t) => String(t.id) === String(taskId) || String(t._id) === String(taskId));
+    if (index >= 0) {
+      const task = tasks[index];
+      tasks[index] = {
+        ...task,
+        status: 'completed',
+        submittedAt: new Date().toISOString(),
+        pointsEarned: Number(pointsAwarded || 0),
+        earnedPoints: Number(pointsAwarded || 0),
+        score: Number(correctCount || 0),
+        total: Number(totalCount || 0),
+        mode,
+      };
+    } else if (taskId) {
+      tasks.push({
+        id: taskId,
+        _id: taskId,
+        subject: subject || '學習任務',
+        topic: '線上測驗',
+        status: 'completed',
+        submittedAt: new Date().toISOString(),
+        pointsEarned: Number(pointsAwarded || 0),
+        earnedPoints: Number(pointsAwarded || 0),
+        score: Number(correctCount || 0),
+        total: Number(totalCount || 0),
+        mode,
+      });
+    }
+
+    const nextPoints = Number(state.points || 0) + Number(awardPoints || 0);
+    state.points = nextPoints;
+    state.streak = Math.max(Number(state.streak || 0), 1);
+    state.subjectAccuracy = state.subjectAccuracy || {};
+    if (subject) {
+      const nextRatio = totalCount > 0 ? Math.round((Number(correctCount || 0) / Number(totalCount || 0)) * 100) : 100;
+      state.subjectAccuracy[subject] = nextRatio;
+    }
+    state.messages = Array.isArray(state.messages) ? state.messages : [];
+    const summary = message || `${subject || '任務'} 已完成：${correctCount || 0}/${totalCount || 0}，獲得 ${pointsAwarded || 0} 點。`;
+    if (summary) {
+      state.messages.push(summary);
+    }
+    state.tasks = tasks;
+    return state;
+  }, { notify: true });
+  return db;
+}
+
 // --- 學生端邏輯 ---
 function renderStudentHome(db) {
+  const activityTasks = (db.extraTasks || []).filter(task => task.isActivity || task.item_type === 'habit' || task.isHabit);
+  // ★ 若家長建立了活動/習慣範本，自動補齊讓學生首頁可即時打卡
+  (db.activities || []).forEach(act => {
+    const actId = String(act._id || act.id);
+    const exists = activityTasks.some(t => String(t.activityId) === actId || (t.topic === act.name && t.subject === act.category));
+    if (!exists) {
+      activityTasks.push({
+        id: `act-${actId}`,
+        _id: `act-${actId}`,
+        subject: act.category,
+        topic: act.name,
+        points: Number(act.points || 10),
+        icon: act.icon || '⭐',
+        isActivity: true,
+        item_type: 'habit',
+        status: 'pending'
+      });
+    }
+  });
+  const studentTasks = [...(db.tasks || []), ...activityTasks];
   document.getElementById('s-streak-days').textContent = db.streak;
   
-  const completed = db.tasks.filter(t => t.status === 'completed').length;
-  const total = db.tasks.length;
+  const completed = studentTasks.filter(t => t.status === 'completed').length + (db.taskReviews || []).filter(t => t.status === 'completed').length;
+  const total = studentTasks.length + (db.taskReviews || []).filter(t => t.status === 'completed').length;
   document.getElementById('s-tasks-completed').textContent = completed;
   document.getElementById('s-tasks-total').textContent = `/${total}`;
   
@@ -677,7 +1379,7 @@ function renderStudentHome(db) {
 
   // Messages
   const msgContainer = document.getElementById('s-messages-container');
-  if(db.messages.length > 0) {
+  if((db.messages || []).length > 0) {
     const lastMsg = db.messages[db.messages.length-1];
     msgContainer.innerHTML = `
       <div style="background:#F0FFF4;border:0.5px solid #9AE6B4;border-radius:10px;padding:9px 12px;margin-bottom:9px">
@@ -689,15 +1391,27 @@ function renderStudentHome(db) {
     msgContainer.innerHTML = '';
   }
 
+  const reviews = (db.taskReviews || []).slice(-3).reverse();
+  if (reviews.length) {
+    msgContainer.insertAdjacentHTML('beforeend', reviews.map(review => `
+      <div style="background:${review.status === 'rejected' ? '#fff5f5' : '#f0fff4'};border:1px solid ${review.status === 'rejected' ? '#fca5a5' : '#9ae6b4'};border-radius:8px;padding:9px 12px;margin-bottom:8px">
+        <div style="font-size:11px;font-weight:600;color:${review.status === 'rejected' ? '#b91c1c' : '#276749'}">${review.status === 'rejected' ? '作業需要再完成' : '家長完成評估'}</div>
+        <div style="font-size:11px;color:#0f0f14">${review.subject} · ${review.topic}</div>
+        ${review.parentNote ? `<div style="font-size:11px;color:#4b5563;margin-top:3px">${review.parentNote}</div>` : ''}
+        ${review.status === 'completed' ? `<div style="font-size:10px;color:#276749;margin-top:3px">已核發 ${review.earnedPoints || 0} 點</div>` : ''}
+      </div>
+    `).join(''));
+  }
+
   // Tasks
   const taskList = document.getElementById('s-tasks-list');
-  taskList.innerHTML = db.tasks.map(t => {
+  taskList.innerHTML = studentTasks.map(t => {
     let icon = '📖';
     if(t.subject==='數學') icon='🔢'; else if(t.subject==='社會') icon='🌍'; else if(t.subject==='英語') icon='💬'; else if(t.subject==='自然') icon='🔬';
-    if(t.isHabit && t.icon) icon = t.icon;
+    if((t.isHabit || t.isActivity) && t.icon) icon = t.icon;
     
     let edition = db.profile && db.profile.editions ? db.profile.editions[t.subject] || '通用版' : '通用版';
-    if(t.isHabit) edition = '習慣與活動';
+    if(t.isHabit || t.isActivity) edition = '習慣與活動';
 
     if(t.status === 'completed') {
       return `
@@ -707,24 +1421,49 @@ function renderStudentHome(db) {
           <span style="background:#C6F6D5;color:#276749;font-size:9px;font-weight:500;padding:2px 7px;border-radius:10px">✓ 完成</span>
         </div>
       `;
-    } else {
+    } else if (t.status === 'pending') {
       return `
         <div class="subj-row" style="background:rgba(26,26,46,0.03);border-radius:8px;padding:8px;margin:4px -2px;border:1px solid #1a1a2e">
           <div class="subj-icon" style="background:#FEFCBF"><span style="font-size:15px">${icon}</span></div>
           <div style="flex:1"><div class="subj-name">${t.subject}</div><div class="subj-meta">${t.topic} · ${edition}</div></div>
           <div style="display:flex;gap:5px">
-            <div onclick="${t.isHabit ? `finishHabit('${t.id}')` : `startQuiz('${t._id || t.id}', '${t.subject}')`}" class="p-btn p-btn-dark" style="font-size:11px;padding:5px 10px">${t.isHabit ? '完成打卡' : '開始'}</div>
-            <div onclick="prepSkip('${t._id || t.id}', '${t.subject}')" class="p-btn p-btn-ghost" style="font-size:11px;padding:5px 10px">先跳過?</div>
+            <div onclick="${t.isActivity ? `startExtraQuiz('${t._id || t.id}')` : t.isHabit ? `finishHabit('${t.id}')` : `startQuiz('${t._id || t.id}', '${t.subject}')`}" class="p-btn p-btn-dark" style="font-size:11px;padding:5px 10px">${t.isActivity || t.isHabit ? '打卡' : '開始'}</div>
+            ${t.isActivity ? '' : `<div onclick="prepSkip('${t._id || t.id}', '${t.subject}')" class="p-btn p-btn-ghost" style="font-size:11px;padding:5px 10px">先跳過?</div>`}
           </div>
         </div>
       `;
     }
+    if (t.status === 'submitted') {
+      return `<div class="subj-row"><div class="subj-icon" style="background:#fef3c7">⏳</div><div style="flex:1"><div class="subj-name">${t.subject}</div><div class="subj-meta">${t.topic} · 等待家長評估</div></div><span style="font-size:9px;color:#b45309">審核中</span></div>`;
+    }
+    if (t.status === 'rejected') {
+      return `<div class="subj-row" style="border:1px solid #fca5a5"><div class="subj-icon" style="background:#fee2e2">↻</div><div style="flex:1"><div class="subj-name">${t.subject}</div><div class="subj-meta">${t.topic} · ${t.parentNote || '請重新完成'}</div></div><div onclick="${t.isActivity ? `startExtraQuiz('${t._id || t.id}')` : `startQuiz('${t._id || t.id}', '${t.subject}')`}" class="p-btn p-btn-dark" style="font-size:10px;padding:5px 8px">重做</div></div>`;
+    }
+    return '';
   }).join('');
 }
 
 function renderStudentChoose(db) {
   const list = document.getElementById('s-choose-list');
-  const pending = db.tasks.filter(t => t.status === 'pending');
+  const activityTasks = (db.extraTasks || []).filter(task => task.isActivity || task.item_type === 'habit' || task.isHabit);
+  (db.activities || []).forEach(act => {
+    const actId = String(act._id || act.id);
+    const exists = activityTasks.some(t => String(t.activityId) === actId || (t.topic === act.name && t.subject === act.category));
+    if (!exists) {
+      activityTasks.push({
+        id: `act-${actId}`,
+        _id: `act-${actId}`,
+        subject: act.category,
+        topic: act.name,
+        points: Number(act.points || 10),
+        icon: act.icon || '⭐',
+        isActivity: true,
+        item_type: 'habit',
+        status: 'pending'
+      });
+    }
+  });
+  const pending = [...(db.tasks || []), ...activityTasks].filter(t => t.status === 'pending');
   
   if(pending.length === 0) {
     list.innerHTML = '<div style="text-align:center;padding:20px;color:#9ca3af;font-size:12px;">今天任務已全數完成！🎉</div>';
@@ -734,13 +1473,13 @@ function renderStudentChoose(db) {
   list.innerHTML = pending.map(t => {
     let icon = '📖';
     if(t.subject==='數學') icon='🔢'; else if(t.subject==='社會') icon='🌍'; else if(t.subject==='英語') icon='💬'; else if(t.subject==='自然') icon='🔬';
-    if(t.isHabit && t.icon) icon = t.icon;
+    if((t.isHabit || t.isActivity) && t.icon) icon = t.icon;
     return `
-      <div class="drag-card" onclick="${t.isHabit ? `finishHabit('${t.id}')` : `startQuiz('${t._id || t.id}', '${t.subject}')`}">
+      <div class="drag-card" onclick="${t.isActivity ? `startExtraQuiz('${t._id || t.id}')` : t.isHabit ? `finishHabit('${t.id}')` : `startQuiz('${t._id || t.id}', '${t.subject}')`}">
         <div style="font-size:15px;color:#d1d5db;padding-right:2px">⋮⋮</div>
         <div class="subj-icon" style="background:#f3f4f6;width:34px;height:34px"><span style="font-size:15px">${icon}</span></div>
         <div style="flex:1"><div style="font-size:13px;font-weight:500;color:#0f0f14">${t.subject} · ${t.topic}</div></div>
-        <div class="p-btn p-btn-dark" style="font-size:11px;padding:5px 10px">${t.isHabit ? '打卡' : '開始'}</div>
+        <div class="p-btn p-btn-dark" style="font-size:11px;padding:5px 10px">${t.isActivity || t.isHabit ? '打卡' : '開始'}</div>
       </div>
     `;
   }).join('');
@@ -761,7 +1500,7 @@ function renderStudentRewards(db) {
   if(approvedRequests.length > 0) {
     html += `<div style="font-size:13px;font-weight:500;margin-bottom:8px;color:#276749">✨ 已經可以去領取的獎勵</div>`;
     approvedRequests.forEach(req => {
-      const r = db.rewards.find(x => x.id === req.rewardId);
+      const r = db.rewards.find(x => String(x.id) === String(req.rewardId) || String(x._id) === String(req.rewardId));
       if(r) {
         html += `
           <div class="reward-item" style="background:#F0FFF4;border:1px solid #9AE6B4;border-radius:10px;padding:10px;margin-bottom:8px">
@@ -798,88 +1537,208 @@ function renderStudentRewards(db) {
   html += `<div style="font-size:13px;font-weight:500;margin-bottom:8px">所有可兌換項目</div>`;
   
   html += readyRewards.map(r => {
+    const rId = String(r.id || r._id);
     const canAfford = db.points >= r.cost;
-    const isPending = db.rewardRequests.some(req => req.rewardId === r.id && req.status === 'pending');
-    const pct = Math.min(100, Math.round((db.points/r.cost)*100));
+    const isPending = db.rewardRequests.some(req => (String(req.rewardId) === rId) && req.status === 'pending');
+    const isApproved = db.rewardRequests.some(req => (String(req.rewardId) === rId) && req.status === 'approved');
+    const pct = r.cost > 0 ? Math.min(100, Math.round((db.points/r.cost)*100)) : 100;
     
     let btnHtml = '';
+    let itemStyle = '';
     if(isPending) {
-      btnHtml = `<div class="p-btn p-btn-ghost" style="font-size:10px;padding:5px 9px;flex-shrink:0;opacity:0.6">審核中...</div>`;
+      itemStyle = 'opacity:0.6;filter:grayscale(90%);background:#f9fafb;border-style:dashed;';
+      btnHtml = `<div class="p-btn" style="font-size:10px;padding:5px 9px;flex-shrink:0;background:#9ca3af;color:#fff;cursor:not-allowed">已申請 (審核中)</div>`;
+    } else if(isApproved) {
+      itemStyle = 'background:#f0fdf4;border:1px solid #86efac;';
+      btnHtml = `<div class="p-btn" style="font-size:10px;padding:5px 9px;flex-shrink:0;background:#16a34a;color:#fff;cursor:default">已核准兌換 ✓</div>`;
     } else if(canAfford) {
-      btnHtml = `<div onclick="claimReward(${r.id})" class="p-btn p-btn-green" style="font-size:10px;padding:5px 9px;flex-shrink:0">申請兌換</div>`;
+      btnHtml = `<div onclick="claimReward('${r.id}')" class="p-btn p-btn-green" style="font-size:10px;padding:5px 9px;flex-shrink:0">申請兌換</div>`;
     } else {
       btnHtml = `<div class="p-btn p-btn-ghost" style="font-size:10px;padding:5px 9px;flex-shrink:0;opacity:0.5">尚未解鎖</div>`;
     }
 
     return `
-      <div class="reward-item">
+      <div class="reward-item" style="${itemStyle}">
         <div style="font-size:24px;flex-shrink:0">${r.icon}</div>
         <div style="flex:1">
           <div style="font-size:13px;font-weight:500;color:#0f0f14">${r.name}</div>
           <div style="font-size:10px;color:#9ca3af;margin-top:1px">${r.cost}點</div>
           <div class="pbar" style="width:100%;margin-top:5px"><div class="pbar-fill" style="width:${pct}%;background:${canAfford?'#22c55e':'#1a1a2e'}"></div></div>
-          <div style="font-size:10px;color:${canAfford?'#22c55e':'#9ca3af'};margin-top:3px">${canAfford?'✓ 可以換了！':`還差 ${r.cost - db.points} 點`}</div>
+          <div style="font-size:10px;color:${isPending?'#6b7280':isApproved?'#16a34a':canAfford?'#22c55e':'#9ca3af'};margin-top:3px">${isPending?'⏳ 申請審核中...':isApproved?'🎉 爸媽已同意兌換！':canAfford?'✓ 可以換了！':`還差 ${r.cost - db.points} 點`}</div>
         </div>
         ${btnHtml}
       </div>
     `;
   }).join('');
   
+  // ★ P1-9：學生端已兌換記錄區塊
+  if (approvedRequests.length > 0) {
+    html += `<div style="height:1px;background:#e5e7eb;margin:16px 0"></div>`;
+    html += `<div style="font-size:13px;font-weight:500;margin-bottom:8px;color:#166534">🎉 已兌換成功記錄</div>`;
+    approvedRequests.slice(-5).reverse().forEach(req => {
+      const r = db.rewards.find(x => String(x.id) === String(req.rewardId) || String(x._id) === String(req.rewardId));
+      if (r) {
+        const dateStr = req.date ? new Date(req.date).toLocaleDateString('zh-TW') : '';
+        html += `
+          <div style="background:#f0fff4;border:1px solid #bbf7d0;border-radius:8px;padding:8px 12px;margin-bottom:6px;display:flex;align-items:center">
+            <div style="font-size:18px;margin-right:8px">${r.icon}</div>
+            <div style="flex:1">
+              <div style="font-size:12px;font-weight:500;color:#166534">${r.name}</div>
+              <div style="font-size:10px;color:#15803d">${dateStr} · 成功花費 ${r.cost} 點兌換</div>
+            </div>
+            <span style="font-size:9px;background:#bbf7d0;color:#166534;padding:2px 6px;border-radius:6px">已核准</span>
+          </div>
+        `;
+      }
+    });
+  }
+
   list.innerHTML = html;
 }
 
-function useApprovedReward(reqId) {
+async function useApprovedReward(reqId) {
   const db = getDB();
-  db.rewardRequests = db.rewardRequests.filter(req => req.id !== reqId);
+  const req = db.rewardRequests.find(r => String(r.id) === String(reqId) || String(r._id) === String(reqId));
+  if (req) {
+    req.status = 'used';
+  }
+  db.rewardRequests = db.rewardRequests.filter(r => String(r.id) !== String(reqId) && String(r._id) !== String(reqId));
   saveDB(db);
   renderStudentRewards(db);
-}
-
-function claimReward(id) {
-  const db = getDB();
-  const reward = db.rewards.find(r => r.id === id);
-  if(reward && db.points >= reward.cost) {
-    db.points -= reward.cost;
-    db.rewardRequests.push({ id: Date.now(), rewardId: id, date: new Date().toISOString(), status: 'pending' });
-    db.alerts.unshift({ id: Date.now(), type: 'positive', title: `🎁 兌換申請：${reward.name}`, desc: `孩子花費了 ${reward.cost} 點申請兌換「${reward.icon} ${reward.name}」，請前往獎勵設定審核。` });
-    saveDB(db);
-    renderStudentRewards(db);
-    alert('已送出兌換申請！爸媽會收到通知。');
+  try {
+    const rewardId = req?.rewardId;
+    if (rewardId) {
+      await apiFetch(`${API_BASE}/api/rewards/use`, {
+        method: 'POST',
+        body: JSON.stringify({ rewardId, requestId: req._id || req.id })
+      });
+    }
+  } catch (e) {
+    console.warn('後端標記使用失敗：', e.message);
   }
 }
 
-function proposeReward() {
+async function claimReward(id) {
+  const db = getDB();
+  const reward = db.rewards.find(r => String(r.id) === String(id) || String(r._id) === String(id));
+  if (!reward) return alert('找不到此獎勵，請重新整理頁面。');
+
+  // 確認點數足夠
+  if (db.points < reward.cost) {
+    alert(`點數不足！還差 ${reward.cost - db.points} 點。`);
+    return;
+  }
+
+  // ★ P0-4 修復：先更新本地狀態（即時反灰）
+  const reqId = Date.now();
+  db.points -= reward.cost;
+  db.rewardRequests.push({ id: reqId, rewardId: String(reward.id || reward._id), date: new Date().toISOString(), status: 'pending' });
+  db.alerts.unshift({
+    id: reqId,
+    type: 'positive',
+    title: `🎁 兌換申請：${reward.icon} ${reward.name}`,
+    desc: `孩子花費了 ${reward.cost} 點申請兌換「${reward.icon} ${reward.name}」，請前往審核。`
+  });
+  saveDB(db);
+  renderStudentRewards(db); // 即時反灰
+
+  // ★ 同步到後端
+  try {
+    const familyId = localStorage.getItem('learnmate_family_id');
+    const resp = await apiFetch(`${API_BASE}/api/rewards/claim`, {
+      method: 'POST',
+      body: JSON.stringify({ familyId, rewardId: String(reward._id || reward.id) })
+    });
+    const result = await resp.json();
+    if (!resp.ok || !result.success) throw new Error(result.error || '申請同步失敗');
+    await syncState(); // 拉取後端最新狀態
+    alert('✅ 兌換申請已送出！爸媽會收到通知，請等待審核。');
+  } catch (e) {
+    console.warn('兌換申請已暫存本機，後端同步失敗：', e.message);
+    alert('兌換申請已送出（本機）！若爸媽未收到通知，請稍後重新整理。');
+  }
+}
+
+
+async function proposeReward() {
   const name = prompt('你想新增什麼獎勵？');
   if(!name) return;
   const icon = prompt('選一個表情符號代表它？', '🎁') || '🎁';
   const db = getDB();
-  db.rewards.push({ id: Date.now(), name, icon, cost: 0, proposedBy: 'student', status: 'proposed' });
+  const localReward = { id: Date.now(), name, icon, cost: 0, proposedBy: 'student', status: 'proposed' };
+  db.rewards.push(localReward);
   db.alerts.unshift({ id: Date.now(), type: 'positive', title: `✨ 新獎勵許願：${name}`, desc: `孩子提議將「${icon} ${name}」加入獎勵清單，前往設定這需要多少點數吧！` });
   saveDB(db);
+  try {
+    const familyId = localStorage.getItem('learnmate_family_id');
+    const resp = await apiFetch(`${API_BASE}/api/rewards/propose`, {
+      method: 'POST',
+      body: JSON.stringify({ familyId, name, icon })
+    });
+    if (!resp.ok) throw new Error('獎勵提議同步失敗');
+    await syncState();
+  } catch (error) {
+    console.warn('獎勵提議已暫存本機，後端同步失敗：', error.message);
+  }
   alert('提議已送出！等待爸媽同意並設定點數。');
 }
 
 function renderStudentExtra(db) {
   const list = document.getElementById('s-extra-list');
-  if(db.extraTasks.length === 0) {
-    list.innerHTML = '<div style="text-align:center;padding:20px;color:#9ca3af;font-size:12px;">目前沒有加強練習。</div>';
+
+  // ★ P0-7 修復：改用更精確的過濾條件
+  // 顯示所有「未完成」的加強題（包含學科題和活動打卡）
+  const pendingExtra = (db.extraTasks || []).filter(t =>
+    t.status === 'pending' || !t.status
+  );
+
+  // 已提交待審核的題目
+  const submittedExtra = (db.extraTasks || []).filter(t => t.status === 'submitted');
+
+  if(pendingExtra.length === 0 && submittedExtra.length === 0) {
+    list.innerHTML = '<div style="text-align:center;padding:30px;color:#9ca3af;font-size:12px">🎉 目前沒有加強練習。<br><span style="font-size:11px;margin-top:6px;display:block">家長可到「派題」頁面出題給你！</span></div>';
     return;
   }
-  
-  const clearBtn = `<div style="text-align: right; margin-bottom: 8px;"><span onclick="clearExtraTasks()" style="font-size: 11px; color: #ef4444; cursor: pointer; padding: 4px;">🗑️ 清除所有派題</span></div>`;
-  
-  list.innerHTML = clearBtn + db.extraTasks.map(t => `
-    <div class="p-card">
-      <div style="display:flex;align-items:center;gap:10px">
-        <div style="flex:1">
-          <div style="font-size:13px;font-weight:500;color:#0f0f14;margin-bottom:5px">${t.subject} · ${t.topic}</div>
-          <div style="font-size:10px;color:#9ca3af">${t.questions.length} 題 · +15點</div>
+
+  let html = '';
+
+  // 待審核中的項目
+  if (submittedExtra.length > 0) {
+    html += `<div style="font-size:12px;font-weight:600;color:#b45309;margin-bottom:8px">⏳ 審核中（${submittedExtra.length} 項）</div>`;
+    html += submittedExtra.map(t => `
+      <div class="p-card" style="opacity:0.7;margin-bottom:8px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="flex:1">
+            <div style="font-size:13px;font-weight:500;color:#0f0f14;margin-bottom:3px">${t.icon || (t.isActivity ? '🏅' : '📝')} ${t.subject} · ${t.topic}</div>
+            <div style="font-size:10px;color:#b45309">已送出，等待家長確認 · +${t.earnedPoints || t.points || 15} 點</div>
+          </div>
+          <div style="font-size:9px;background:#fef3c7;color:#b45309;padding:4px 8px;border-radius:8px">審核中</div>
         </div>
-        <div onclick="startExtraQuiz('${t._id || t.id}')" class="p-btn p-btn-green" style="font-size:12px;padding:8px 14px;flex-shrink:0">開始練習</div>
       </div>
-    </div>
-  `).join('');
+    `).join('');
+    html += `<div style="height:1px;background:#e5e7eb;margin:12px 0"></div>`;
+  }
+
+  if (pendingExtra.length > 0) {
+    html += `<div style="font-size:12px;font-weight:600;color:#276749;margin-bottom:8px">💪 待完成加強題（${pendingExtra.length} 項）</div>`;
+    const clearBtn = `<div style="text-align:right;margin-bottom:8px"><span onclick="clearExtraTasks()" style="font-size:11px;color:#ef4444;cursor:pointer;padding:4px">🗑️ 清除所有派題</span></div>`;
+    html += clearBtn;
+    html += pendingExtra.map(t => `
+      <div class="p-card" style="margin-bottom:8px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="flex:1">
+            <div style="font-size:13px;font-weight:500;color:#0f0f14;margin-bottom:5px">${t.icon || (t.isActivity ? '🏅' : '📝')} ${t.subject} · ${t.topic}</div>
+            <div style="font-size:10px;color:#9ca3af">${t.isActivity ? '活動打卡' : `${(t.questions || []).length} 題`} · +${t.points || 15} 點</div>
+          </div>
+          <div onclick="startExtraQuiz('${t._id || t.id}')" class="p-btn p-btn-green" style="font-size:12px;padding:8px 14px;flex-shrink:0">${t.isActivity ? '打卡' : '開始練習'}</div>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  list.innerHTML = html;
 }
+
 
 function clearExtraTasks() {
   if(!confirm('確定要清除所有家長派題(加強練習)嗎？')) return;
@@ -902,12 +1761,13 @@ const MOCK_QUESTIONS = [
 
 async function startQuiz(taskId, subject) {
   const db = getDB();
-  const task = db.tasks.find(t => String(t.id) === String(taskId) || String(t._id) === String(taskId));
-  const topic = task ? task.topic : subject;
+  const familyId = localStorage.getItem('learnmate_family_id');
+  const grade = db.profile?.grade || '5';
+  const edition = db.profile?.editions?.[subject] || '康軒版';
 
   // 先切換畫面，顯示 loading
   document.getElementById('s-quiz-subject').textContent = subject;
-  activeQuiz = { type: 'daily', id: taskId, questions: [], currentIdx: 0 };
+  activeQuiz = { type: 'daily', id: taskId, questions: [], currentIdx: 0, correctCount: 0 };
   navTo('screen-student-quiz');
 
   // 顯示 loading 狀態
@@ -915,27 +1775,127 @@ async function startQuiz(taskId, subject) {
   document.getElementById('opts').innerHTML = `
     <div style="text-align:center;padding:20px;color:#9ca3af;font-size:12px">
       <div style="font-size:24px;margin-bottom:8px">🤖</div>
-      Gemini AI 依據你的教材版本生成中...
+      Gemini AI 多 Agent 協同命題與進度偵測中...
     </div>`;
   document.getElementById('qdots').innerHTML = '';
   document.getElementById('explain').style.display = 'none';
   document.getElementById('next-btn').style.display = 'none';
   document.getElementById('pts-label').textContent = '準備中...';
 
-  // 非同步取得 AI 題目
-  const questions = await fetchAIQuestions(subject, topic, 5);
-  activeQuiz.questions = questions;
-  renderQuizQ();
+  try {
+    const resp = await apiFetch(`${API_BASE}/api/tasks/generate`, {
+      method: 'POST',
+      body: JSON.stringify({
+        subject,
+        topic: '', // 留空以觸發後端的教材進度預估與偏差微調
+        grade,
+        edition,
+        familyId,
+        count: 5
+      })
+    });
+    
+    if (!resp.ok) {
+      throw new Error('伺服器出題失敗');
+    }
+    
+    const data = await resp.json();
+    if (data.success && data.task && data.task.questions) {
+      activeQuiz.id = data.task._id;
+      activeQuiz.questions = data.task.questions.map(q => ({
+        q: q.q,
+        opts: q.opts,
+        a: q.a,
+        exp: q.exp || '太棒了！'
+      }));
+      renderQuizQ();
+      
+      // 同步最新狀態
+      await syncState();
+    } else {
+      throw new Error(data.error || '後端回傳格式錯誤');
+    }
+  } catch (e) {
+    console.error('出題失敗，改採 Mock 備用題庫：', e.message);
+    const questions = await fetchAIQuestions(subject, subject, 5);
+    activeQuiz.questions = questions;
+    renderQuizQ();
+  }
 }
 
 function startExtraQuiz(extraId) {
   const db = getDB();
   const task = db.extraTasks.find(t => String(t.id) === String(extraId) || String(t._id) === String(extraId));
   if(!task) return;
+  if (task.isActivity || !Array.isArray(task.questions) || task.questions.length === 0) {
+    document.getElementById('s-quiz-subject').textContent = `${task.subject} (活動)`;
+    activeQuiz = { type: 'extra', id: task._id || task.id, isActivity: true, points: Number(task.points || 10), questions: [] };
+    navTo('screen-student-quiz');
+    document.getElementById('qnum').textContent = '活動打卡';
+    document.getElementById('qcounter').textContent = '';
+    document.getElementById('qtext').textContent = `完成「${task.topic}」後，請按下方送出打卡。`;
+    document.getElementById('qdots').innerHTML = '';
+    document.getElementById('opts').innerHTML = '<button onclick="finishActivity()" class="p-btn p-btn-green p-btn-lg" style="width:100%;font-size:16px">我完成了！</button>';
+    document.getElementById('explain').style.display = 'none';
+    document.getElementById('next-btn').style.display = 'none';
+    document.getElementById('pts-label').textContent = `送出後待家長確認 · ${activeQuiz.points} 點`;
+    return;
+  }
   document.getElementById('s-quiz-subject').textContent = task.subject + ' (加強)';
   activeQuiz = { type: 'extra', id: extraId, questions: task.questions.map(q => ({q:q.q, opts:q.opts, a:q.a, exp:'很棒！'})), currentIdx: 0 };
   navTo('screen-student-quiz');
   renderQuizQ();
+}
+
+async function finishActivity() {
+  if (!activeQuiz?.isActivity) return;
+  try {
+    const resp = await apiFetch(`${API_BASE}/api/tasks/submit`, {
+      method: 'POST',
+      body: JSON.stringify({ taskId: activeQuiz.id, earnedPoints: activeQuiz.points })
+    });
+    const result = await resp.json();
+    if (!resp.ok || !result.success) throw new Error(result.error || '活動打卡送出失敗');
+    const localDB = normalizeDB(getDB());
+    const localTask = (localDB.extraTasks || []).find(task => String(task._id || task.id) === String(activeQuiz.id));
+    if (localTask) {
+      localTask.status = 'submitted';
+      localTask.earnedPoints = activeQuiz.points;
+      saveDB(localDB);
+    }
+    await syncState();
+    alert(`打卡已送出，家長確認後將核發 ${activeQuiz.points} 點。`);
+    navTo('screen-student-home');
+  } catch (error) {
+    console.warn('遠端打卡提交失敗，改用本機備援模式：', error.message);
+    const localDB = normalizeDB(getDB());
+    let localTask = (localDB.extraTasks || []).find(task => String(task._id || task.id) === String(activeQuiz.id));
+    if (localTask) {
+      localTask.status = 'submitted';
+      localTask.earnedPoints = activeQuiz.points;
+    } else {
+      localDB.extraTasks.push({
+        id: activeQuiz.id,
+        _id: activeQuiz.id,
+        subject: '習慣打卡',
+        topic: '活動打卡',
+        status: 'submitted',
+        earnedPoints: activeQuiz.points,
+        points: activeQuiz.points,
+        isActivity: true
+      });
+    }
+    localDB.alerts.unshift({
+      id: Date.now(),
+      type: 'positive',
+      title: '🏅 習慣活動打卡已送出',
+      desc: `孩子已完成習慣打卡，等待家長評估並核發 ${activeQuiz.points} 點。`
+    });
+    saveDB(localDB);
+    emitStateRefresh();
+    alert(`打卡已送出，家長確認後將核發 ${activeQuiz.points} 點。`);
+    navTo('screen-student-home');
+  }
 }
 
 function renderQuizQ() {
@@ -960,6 +1920,9 @@ function renderQuizQ() {
   document.getElementById('next-btn').style.display = 'none';
   document.getElementById('pts-label').textContent = '選擇你的答案';
   selectedOption = null;
+  
+  const fbBtn = document.getElementById('feedback-trigger-btn');
+  if (fbBtn) fbBtn.style.display = 'none';
 }
 
 function selectOpt(el, idx) {
@@ -980,10 +1943,8 @@ function selectOpt(el, idx) {
     exp.style.cssText = 'display:block;border-left:3px solid #22c55e;border-radius:0 8px 8px 0;background:#F0FFF4;padding:9px 11px;margin-bottom:10px';
     exp.innerHTML = `<div style="font-size:11px;font-weight:500;color:#276749;margin-bottom:3px">答對了！</div><div style="font-size:11px;color:#276749;line-height:1.5">${q.exp}</div>`;
     
-    // Add points
-    const db = getDB();
-    db.points += 2;
-    saveDB(db);
+    // 統計答對題數
+    activeQuiz.correctCount = (activeQuiz.correctCount || 0) + 1;
     
     document.getElementById('pts-label').innerHTML = `+2 點 獲得中...<span class="points-float">+2 點！</span>`;
   } else {
@@ -991,6 +1952,9 @@ function selectOpt(el, idx) {
     exp.innerHTML = `<div style="font-size:11px;font-weight:500;color:#9B2C2C;margin-bottom:3px">沒關係，來看看解釋！</div><div style="font-size:11px;color:#9B2C2C;line-height:1.5">${q.exp}</div>`;
     document.getElementById('pts-label').textContent = '繼續加油！';
   }
+  
+  const fbBtn = document.getElementById('feedback-trigger-btn');
+  if (fbBtn) fbBtn.style.display = 'block';
   
   document.getElementById('next-btn').style.display = 'block';
   if(activeQuiz.currentIdx === activeQuiz.questions.length - 1) {
@@ -1007,17 +1971,63 @@ function nextQ() {
   }
 }
 
-function finishQuiz() {
-  const db = getDB();
-  if(activeQuiz.type === 'daily') {
-    const task = db.tasks.find(t => t.id === activeQuiz.id);
-    if(task) { task.status = 'completed'; db.points += 10; }
-  } else {
-    db.extraTasks = db.extraTasks.filter(t => t.id !== activeQuiz.id);
-    db.points += 15;
+async function finishQuiz() {
+  const familyId = localStorage.getItem('learnmate_family_id');
+  const correctCount = activeQuiz.correctCount || 0;
+  const totalCount = activeQuiz.questions.length || 5;
+  const subject = document.getElementById('s-quiz-subject').textContent.replace(' (加強)', '');
+  const earnedPoints = activeQuiz.type === 'daily' ? (correctCount * 2) + 10 : (correctCount * 2) + 15;
+
+  const localResult = applyStudentTaskResult({
+    taskId: activeQuiz.id,
+    subject,
+    correctCount,
+    totalCount,
+    pointsAwarded: earnedPoints,
+    awardPoints: 0,
+    mode: activeQuiz.type || 'daily',
+    message: `學生已完成 ${subject} 測驗：${correctCount}/${totalCount}，等待家長評估 ${earnedPoints} 點。`
+  });
+
+  try {
+    await apiFetch(`${API_BASE}/api/tasks/complete`, {
+      method: 'POST',
+      body: JSON.stringify({
+        familyId,
+        taskId: activeQuiz.id,
+        pointsToAdd: 0,
+        correctCount,
+        totalCount,
+        subject
+      })
+    }).catch(() => null);
+
+    await apiFetch(`${API_BASE}/api/tasks/submit`, {
+      method: 'POST',
+      body: JSON.stringify({
+        taskId: activeQuiz.id,
+        earnedPoints,
+        correctCount,
+        totalCount,
+        subject
+      })
+    }).catch(() => null);
+
+    await syncState();
+  } catch (e) {
+    console.warn('遠端提交未成功，使用本地狀態同步：', e.message);
   }
-  saveDB(db);
-  alert('測驗完成！獲得大量點數！');
+
+  const latestDB = normalizeDB(getDB());
+  if (Array.isArray(latestDB.tasks)) {
+    const task = latestDB.tasks.find((item) => String(item.id) === String(activeQuiz.id) || String(item._id) === String(activeQuiz.id));
+    if (task) {
+      task.status = 'submitted';
+      saveDB(latestDB);
+    }
+  }
+
+  alert(`測驗完成！答對 ${correctCount}/${totalCount} 題，${earnedPoints} 點將在家長評估後核發。`);
   navTo('screen-student-home');
 }
 
@@ -1030,6 +2040,15 @@ function cancelQuiz() {
 // --- 暫停功能邏輯 ---
 let skipTaskId = null;
 let skipReason = null;
+
+
+function resetDemo() {
+  if (confirm('確定要將測試資料完全還原到初始狀態嗎？\n這將會清除目前所有測試進度、已完成任務及自訂習慣。')) {
+    localStorage.removeItem('learnmate_db');
+    alert('資料已重置！系統將自動重新整理。');
+    window.location.reload();
+  }
+}
 
 function prepSkip(taskId, subject) {
   skipTaskId = taskId;
@@ -1054,40 +2073,68 @@ function selReason(el, reason) {
   }
 }
 
-function confirmSkip() {
-  const db = getDB();
-  db.points = Math.max(0, db.points - 5);
-  const task = db.tasks.find(t => t.id === skipTaskId);
-  if(task) task.status = 'skipped';
-  
-  if(skipReason === '看不懂') {
-    db.alerts.unshift({ id: Date.now(), type: 'critical', title: `${task.subject} — 需要神隊友救援 🚨`, desc: '孩子誠實地表示這科看不懂，這是一個很棒的自我察覺！建議今晚先給他一個擁抱，再一起看看哪裡卡住了。' });
-  } else if(skipReason === '功課太多') {
-    db.alerts.unshift({ id: Date.now(), type: 'warning', title: `${task.subject} — 功課太多暫停`, desc: `孩子覺得學校功課太多，選擇先讓大腦休息。請給予他的時間管理肯定！` });
-  } else {
-    db.alerts.unshift({ id: Date.now(), type: 'warning', title: `${task.subject} — 暫停`, desc: `孩子因為「${skipReason}」暫停了這科。` });
+async function confirmSkip() {
+  try {
+    const familyId = localStorage.getItem('learnmate_family_id');
+    const resp = await apiFetch(`${API_BASE}/api/tasks/skip`, {
+      method: 'POST',
+      body: JSON.stringify({
+        familyId,
+        taskId: skipTaskId,
+        reason: skipReason
+      })
+    });
+    if (resp.ok) {
+      await syncState();
+      alert('已確認暫停，扣除 5 點，家長將會收到預警通知。');
+    }
+  } catch (e) {
+    console.error('跳過任務失敗：', e.message);
+    alert('操作失敗，請稍後重試。');
   }
-  
-  saveDB(db);
-  alert('已確認暫停。');
   navTo('screen-student-home');
 }
 
-function finishHabit(taskId) {
+async function finishHabit(taskId) {
   const db = getDB();
-  const task = db.tasks.find(t => String(t.id) === String(taskId));
-  if(task) {
-    task.status = 'completed';
-    db.points += (task.points || 10);
-    db.alerts.unshift({ 
-        id: Date.now(), 
-        type: 'positive', 
-        title: `✨ 習慣打卡審查：${task.topic}`, 
-        desc: `孩子已完成「${task.topic}」並獲得 ${task.points || 10} 點，請核對是否確實完成！` 
+  const task = [...(db.extraTasks || []), ...(db.tasks || [])].find(t => String(t.id) === String(taskId) || String(t._id) === String(taskId));
+  if (!task) return alert('找不到這筆習慣任務，請重新整理頁面。');
+  const pointsAwarded = Number(task.points || 10);
+  try {
+    const resp = await apiFetch(`${API_BASE}/api/tasks/submit`, {
+      method: 'POST',
+      body: JSON.stringify({ taskId: task._id || task.id, earnedPoints: pointsAwarded })
     });
-    saveDB(db);
-    alert(`打卡成功！已送出審查並獲得 ${task.points || 10} 點！`);
-    updateScreenData(currentScreen);
+    const result = await resp.json();
+    if (!resp.ok || !result.success) throw new Error(result.error || '習慣打卡送出失敗');
+    const localDB = normalizeDB(getDB());
+    const localTask = [...(localDB.extraTasks || []), ...(localDB.tasks || [])].find(item => String(item._id || item.id) === String(task._id || task.id));
+    if (localTask) {
+      localTask.status = 'submitted';
+      localTask.earnedPoints = pointsAwarded;
+      saveDB(localDB);
+    }
+    await syncState();
+    alert(`打卡已送出，家長確認後將核發 ${pointsAwarded} 點。`);
+    navTo('screen-student-home');
+  } catch (error) {
+    console.warn('遠端打卡提交失敗，改用本地狀態：', error.message);
+    const localDB = normalizeDB(getDB());
+    const localTask = [...(localDB.extraTasks || []), ...(localDB.tasks || [])].find(item => String(item._id || item.id) === String(task._id || task.id));
+    if (localTask) {
+      localTask.status = 'submitted';
+      localTask.earnedPoints = pointsAwarded;
+    }
+    localDB.alerts.unshift({
+      id: Date.now(),
+      type: 'positive',
+      title: `🏅 ${task.topic || '習慣活動'} 打卡已送出`,
+      desc: `孩子已完成打卡，等待家長評估並核發 ${pointsAwarded} 點。`
+    });
+    saveDB(localDB);
+    emitStateRefresh();
+    alert(`打卡已送出，家長確認後將核發 ${pointsAwarded} 點。`);
+    navTo('screen-student-home');
   }
 }
 
@@ -1097,6 +2144,12 @@ window.addEventListener('storage', (e) => {
     if (currentScreen !== 'screen-login') {
       updateScreenData(currentScreen);
     }
+  }
+});
+window.addEventListener('learnmate-state-sync', (event) => {
+  const db = event.detail || getDB();
+  if (db && currentScreen !== 'screen-login') {
+    updateScreenData(currentScreen);
   }
 });
 
@@ -1186,6 +2239,81 @@ function refreshVideoRecommendations() {
 }
 
 // =========================================================
+// ★ P0-1：歡迎引導 Modal 控制函式
+// =========================================================
+let _welcomeStep = 0;
+const WELCOME_SHOWN_KEY = 'learnmate_welcome_shown';
+
+function checkAndShowWelcome() {
+  const familyId = localStorage.getItem('learnmate_family_id') || 'guest';
+  const shownKey = `${WELCOME_SHOWN_KEY}_${familyId}`;
+  if (!localStorage.getItem(shownKey)) {
+    const modal = document.getElementById('welcome-modal');
+    if (modal) {
+      modal.style.display = 'flex';
+      _welcomeStep = 0;
+      showWelcomeStep(0);
+    }
+  }
+}
+
+function showWelcomeStep(step) {
+  for (let i = 0; i < 4; i++) {
+    const stepEl = document.getElementById(`wstep-${i}`);
+    const dotEl = document.getElementById(`wdot-${i}`);
+    if (stepEl) stepEl.style.display = i === step ? 'block' : 'none';
+    if (dotEl) {
+      dotEl.style.background = i === step ? '#1a1a2e' : '#e5e7eb';
+      dotEl.style.width = i === step ? '20px' : '8px';
+    }
+  }
+  _welcomeStep = step;
+}
+
+function nextWelcomeStep(current) {
+  if (current < 3) showWelcomeStep(current + 1);
+}
+
+function prevWelcomeStep(current) {
+  if (current > 0) showWelcomeStep(current - 1);
+}
+
+function closeWelcome() {
+  const modal = document.getElementById('welcome-modal');
+  if (modal) modal.style.display = 'none';
+  // 記錄已顯示過（此帳號不再重複顯示）
+  const familyId = localStorage.getItem('learnmate_family_id') || 'guest';
+  localStorage.setItem(`${WELCOME_SHOWN_KEY}_${familyId}`, '1');
+  // 引導到設定頁面
+  if (currentUser === 'parent') {
+    setTimeout(() => navTo('screen-parent-settings'), 300);
+  }
+}
+
+// =========================================================
+// ★ P0-5：後台輪詢機制（確保雙端即時同步）
+// =========================================================
+let _pollingTimer = null;
+
+function startPolling(intervalMs = 30000) {
+  stopPolling(); // 避免重複啟動
+  _pollingTimer = setInterval(async () => {
+    if (currentScreen && currentScreen !== 'screen-login') {
+      await syncState();
+    }
+  }, intervalMs);
+  console.log(`🔄 [Polling] 已啟動後台同步，間隔 ${intervalMs / 1000} 秒。`);
+}
+
+function stopPolling() {
+  if (_pollingTimer) {
+    clearInterval(_pollingTimer);
+    _pollingTimer = null;
+    console.log('⏹️ [Polling] 已停止後台同步。');
+  }
+}
+
+// =========================================================
 // ★ 底部導覽列（已改用 flex layout，此函數保留相容性）
 // =========================================================
 function updateNavPosition() {
@@ -1194,3 +2322,147 @@ function updateNavPosition() {
 
 window.addEventListener('resize', updateNavPosition);
 window.addEventListener('DOMContentLoaded', () => { setTimeout(updateNavPosition, 100); });
+
+// =========================================================
+// ★ 新增功能：題目錯誤/超綱回報、進度微調與成長護照 PDF 匯出
+// =========================================================
+
+// 1. 題目錯誤與超綱回報 (Feedback Loop)
+async function reportQuizQuestion() {
+  if (!activeQuiz || !activeQuiz.questions) return;
+  const q = activeQuiz.questions[activeQuiz.currentIdx];
+  if (!q) return;
+
+  const feedbackType = prompt(
+    "請選擇回報的問題類型：\n1. 答案錯誤 / 解析有誤\n2. 題目超綱（不符合此年級）\n3. 題目語意不清 / 選項有瑕疵\n(請輸入數字 1, 2 或 3)"
+  );
+  if (!feedbackType) return;
+
+  let typeString = "";
+  if (feedbackType === "1") typeString = "答案錯誤";
+  else if (feedbackType === "2") typeString = "超綱";
+  else if (feedbackType === "3") typeString = "語意不清";
+  else {
+    alert("輸入錯誤，回報已取消。");
+    return;
+  }
+
+  const parentNote = prompt("請提供您的具體回報意見（可留空）：");
+  if (parentNote === null) return; // 按取消
+
+  const familyId = localStorage.getItem("learnmate_family_id");
+  const subject = document.getElementById("s-quiz-subject").textContent.replace(" (加強)", "");
+
+  try {
+    const resp = await apiFetch(`${API_BASE}/api/quiz/feedback`, {
+      method: "POST",
+      body: JSON.stringify({
+        familyId,
+        subject,
+        q: q.q,
+        opts: q.opts,
+        a: q.a,
+        userAnswer: selectedOption,
+        feedback_type: typeString,
+        parent_note: parentNote
+      })
+    });
+    const data = await resp.json();
+    if (data.success) {
+      alert("感謝您的回報！此題目已記錄，AI 出題 Agent 下次生成考題時將會自動避開此類錯誤（Bad Cases 避雷針）。");
+    } else {
+      alert("回報失敗：" + data.error);
+    }
+  } catch (e) {
+    console.error("提交題目回報出錯：", e.message);
+    alert("網路錯誤，無法送出回報。");
+  }
+}
+
+// 2. 下載兒童成長護照 PDF
+function downloadPassportPDF() {
+  const familyId = localStorage.getItem("learnmate_family_id");
+  if (!familyId) {
+    alert("請先登入！");
+    return;
+  }
+  const url = `${API_BASE}/api/insights/passport-pdf/${familyId}`;
+  window.open(url, "_blank");
+}
+
+// 3. 載入教材進度預估與微調面板
+async function loadProgressTuningPanel() {
+  const panel = document.getElementById("progress-prediction-panel");
+  if (!panel) return;
+
+  const familyId = localStorage.getItem("learnmate_family_id");
+  if (!familyId) return;
+
+  panel.innerHTML = `<div style="font-size:11px;color:#9ca3af;text-align:center">✨ AI 正在依據週進度庫預估學校單元...</div>`;
+
+  try {
+    const resp = await apiFetch(`${API_BASE}/api/progress/predict?familyId=${familyId}`);
+    const data = await resp.json();
+    if (data.success && data.progressList) {
+      if (data.progressList.length === 0) {
+        panel.innerHTML = `<div style="font-size:11px;color:#9ca3af;text-align:center">目前無課綱設定</div>`;
+        return;
+      }
+
+      panel.innerHTML = data.progressList.map(p => {
+        const offset = p.offset || 0;
+        return `
+          <div style="background:#fff;border-radius:6px;padding:8px;margin-bottom:6px;border:1.5px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between">
+            <div style="flex:1;min-width:0;padding-right:6px">
+              <div style="font-size:12px;font-weight:600;color:#0f0f14;display:flex;align-items:center;gap:4px">
+                <span>${p.subject}</span>
+                <span style="font-size:9px;background:#e2e8f0;color:#4a5568;padding:1px 5px;border-radius:4px">${p.edition}</span>
+              </div>
+              <div style="font-size:10px;color:#6b7280;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+                第 ${p.currentWeek} 週進度：<b>${p.unit}</b>
+              </div>
+              <div style="font-size:9px;color:#9ca3af;margin-top:1px">
+                官方第 ${p.targetWeek} 週 · 微調：${offset >= 0 ? '+' : ''}${offset} 週
+              </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:3px;flex-shrink:0">
+              <button onclick="adjustProgressOffset('${p.subject}', ${offset + 1})" style="background:#2d4a3e;color:#a8d5b5;border:none;border-radius:4px;padding:3px 6px;font-size:9px;cursor:pointer;font-weight:500">快一週 +1</button>
+              <button onclick="adjustProgressOffset('${p.subject}', ${offset - 1})" style="background:#fff;border:1px solid #d1d5db;color:#555;border-radius:4px;padding:2px 6px;font-size:9px;cursor:pointer">慢一週 -1</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    } else {
+      panel.innerHTML = `<div style="font-size:11px;color:#ef4444;text-align:center">無法加載進度預測</div>`;
+    }
+  } catch (e) {
+    console.error("預測進度出錯：", e.message);
+    panel.innerHTML = `<div style="font-size:11px;color:#ef4444;text-align:center">網路連線異常</div>`;
+  }
+}
+
+// 4. 微調偏差週數 API 呼叫
+async function adjustProgressOffset(subject, offset) {
+  const familyId = localStorage.getItem("learnmate_family_id");
+  if (!familyId) return;
+
+  try {
+    const resp = await apiFetch(`${API_BASE}/api/progress/adjust`, {
+      method: "POST",
+      body: JSON.stringify({
+        familyId,
+        subject,
+        offset
+      })
+    });
+    const data = await resp.json();
+    if (data.success) {
+      console.log(`🎯 [Progress Adjusted] ${subject} Offset 調整為 ${offset}`);
+      await syncState();
+    } else {
+      alert("微調失敗：" + data.error);
+    }
+  } catch (e) {
+    alert("微調進度時發生網路錯誤：" + e.message);
+  }
+}
